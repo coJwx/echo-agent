@@ -4,10 +4,11 @@
 //! All streaming execution goes through this module.
 
 use super::super::{ReactAgent, StepType, TOOL_FINAL_ANSWER};
+use super::execution::tool_observation_text;
 use super::processor::{build_tool_calls_from_map, process_stream_chunk};
 use super::types::{StreamInit, StreamMode};
 use crate::agent::AgentEvent;
-use crate::error::{AgentError, ReactError, Result};
+use crate::error::{AgentError, ReactError, Result, ToolError};
 use crate::llm::types::Message;
 use crate::tools::{ToolParameters, is_read_tool, is_write_tool};
 use futures::StreamExt;
@@ -48,6 +49,20 @@ macro_rules! try_send {
             }
         }
     };
+}
+
+fn strip_reasoning_content(mut messages: Vec<Message>) -> Vec<Message> {
+    for message in &mut messages {
+        message.reasoning_content = None;
+    }
+    messages
+}
+
+fn assistant_message_for_history(mut message: Message, reasoning_buffer: &str) -> Message {
+    if !reasoning_buffer.is_empty() {
+        message.reasoning_content = Some(reasoning_buffer.to_string());
+    }
+    message
 }
 
 // ── ReactAgent: entry point ──────────────────────────────────────────
@@ -270,6 +285,7 @@ impl AgentSnapshot {
                 self.create_llm_stream(messages.clone()).await
             ));
             let mut content_buffer = String::new();
+            let mut reasoning_buffer = String::new();
             let mut tool_call_map: HashMap<u32, (String, String, String)> = HashMap::new();
             let mut last_usage = None;
             let mut in_reasoning = false;
@@ -282,6 +298,7 @@ impl AgentSnapshot {
                 for event in process_stream_chunk(
                     &chunk,
                     &mut content_buffer,
+                    &mut reasoning_buffer,
                     &mut tool_call_map,
                     &mut in_reasoning,
                 ) {
@@ -315,10 +332,11 @@ impl AgentSnapshot {
 
             if !tool_call_map.is_empty() {
                 let (msg_tc, steps) = build_tool_calls_from_map(&tool_call_map);
-                for (_, name, args) in &steps {
+                for (id, name, args) in &steps {
                     yield_event!(
                         tx,
                         AgentEvent::ToolCall {
+                            tool_call_id: id.clone(),
                             name: name.clone(),
                             args: args.clone()
                         }
@@ -340,7 +358,10 @@ impl AgentSnapshot {
                 context
                     .lock()
                     .await
-                    .push(Message::assistant_with_tools(msg_tc));
+                    .push(assistant_message_for_history(
+                        Message::assistant_with_tools(msg_tc),
+                        &reasoning_buffer,
+                    ));
 
                 #[cfg(feature = "human-loop")]
                 let (appr, conc) = {
@@ -409,6 +430,7 @@ impl AgentSnapshot {
                                 yield_event!(
                                     tx,
                                     AgentEvent::ToolResult {
+                                        tool_call_id: id.clone(),
                                         name: fname.clone(),
                                         output: output.clone()
                                     }
@@ -437,6 +459,7 @@ impl AgentSnapshot {
                                 yield_event!(
                                     tx,
                                     AgentEvent::ToolError {
+                                        tool_call_id: id.clone(),
                                         name: fname.clone(),
                                         error: error.to_string()
                                     }
@@ -462,6 +485,7 @@ impl AgentSnapshot {
                             yield_event!(
                                 tx,
                                 AgentEvent::ToolResult {
+                                    tool_call_id: id.clone(),
                                     name: fname.clone(),
                                     output: truncated.clone()
                                 }
@@ -490,6 +514,7 @@ impl AgentSnapshot {
                             yield_event!(
                                 tx,
                                 AgentEvent::ToolError {
+                                    tool_call_id: id.clone(),
                                     name: fname.clone(),
                                     error: error.to_string()
                                 }
@@ -512,7 +537,10 @@ impl AgentSnapshot {
                 context
                     .lock()
                     .await
-                    .push(Message::assistant(content_buffer.clone()));
+                    .push(assistant_message_for_history(
+                        Message::assistant(content_buffer.clone()),
+                        &reasoning_buffer,
+                    ));
                 self.auto_snapshot(&context, iteration).await;
                 if let Some(al) = &self.guard.audit_logger {
                     let ev = crate::audit::AuditEvent::now(
@@ -600,6 +628,7 @@ impl AgentSnapshot {
         &self,
         messages: Vec<Message>,
     ) -> Result<impl futures::Stream<Item = Result<crate::llm::types::ChatCompletionChunk>>> {
+        let messages = strip_reasoning_content(messages);
         let tools = if self.config.enable_tool {
             let t = self.tools.tool_manager.get_openai_tools();
             if t.is_empty() { None } else { Some(t) }
@@ -987,7 +1016,13 @@ impl AgentSnapshot {
                 call_id: call_id.clone(),
                 name: tool_name.to_string(),
                 success: result.success,
-                output_preview: Some(result.output.chars().take(200).collect()),
+                output_preview: Some(
+                    result
+                        .output
+                        .chars()
+                        .take(200)
+                        .collect::<String>(),
+                ),
                 output_truncated: false,
                 duration_ms: 0,
             })
@@ -995,14 +1030,43 @@ impl AgentSnapshot {
 
             if result.success {
                 self.record_file_read_if_needed(tool_name, &effective_params);
+            } else {
+                let error_msg = tool_observation_text(tool_name, &result);
+                let err = ReactError::from(ToolError::ExecutionFailed {
+                    tool: tool_name.to_string(),
+                    message: error_msg.clone(),
+                });
+
+                if let Some(al) = &self.guard.audit_logger {
+                    let ev = crate::audit::AuditEvent::now(
+                        self.config.session_id.clone(),
+                        self.config.agent_name.clone(),
+                        crate::audit::AuditEventType::ToolCall {
+                            tool: tool_name.to_string(),
+                            input: effective_input.clone(),
+                            output: error_msg,
+                            success: false,
+                            duration_ms: 0,
+                        },
+                    );
+                    let _ = al.log(ev).await;
+                }
+
+                if self.config.tool_error_feedback && tool_name != TOOL_FINAL_ANSWER {
+                    return Ok(format!(
+                        "[Tool execution failed] {err}\nTip: adjust parameters based on the error and retry, or try other tools."
+                    ));
+                }
+                return Err(err);
             }
 
             // ── PostToolUse hooks ──
+            let observation = tool_observation_text(tool_name, &result);
             let post_result = hook_reg
                 .run_post_tool_use(
                     tool_name,
                     &effective_input,
-                    &result.output,
+                    &observation,
                     self.config.session_id.as_deref().unwrap_or(""),
                 )
                 .await;
@@ -1014,7 +1078,7 @@ impl AgentSnapshot {
             }
 
             // ── Truncate ──
-            let truncated = self.truncate_output(result.output).await;
+            let truncated = self.truncate_output(observation).await;
             Ok(truncated)
         })
     }
@@ -1067,6 +1131,40 @@ impl AgentSnapshot {
                 .unwrap_or_else(|e| e.into_inner())
                 .insert(canonical, std::time::Instant::now());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_reasoning_content_removes_provider_specific_field() {
+        let mut message = Message::assistant("answer".to_string());
+        message.reasoning_content = Some("private reasoning".to_string());
+
+        let messages = strip_reasoning_content(vec![message]);
+
+        assert_eq!(messages[0].text_content().as_deref(), Some("answer"));
+        assert!(messages[0].reasoning_content.is_none());
+    }
+
+    #[test]
+    fn persisted_assistant_message_keeps_reasoning_for_history() {
+        let message = assistant_message_for_history(
+            Message::assistant("answer".to_string()),
+            "visible thinking",
+        );
+
+        assert_eq!(message.text_content().as_deref(), Some("answer"));
+        assert_eq!(
+            message.reasoning_content.as_deref(),
+            Some("visible thinking")
+        );
+
+        let outbound = strip_reasoning_content(vec![message]);
+        assert_eq!(outbound[0].text_content().as_deref(), Some("answer"));
+        assert!(outbound[0].reasoning_content.is_none());
     }
 }
 

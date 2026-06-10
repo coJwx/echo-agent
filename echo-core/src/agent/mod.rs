@@ -47,6 +47,8 @@ pub enum AgentEvent {
     // ── Tool Invocation ──────────────────────────────────────────────────────────
     /// Preparing to invoke a tool
     ToolCall {
+        /// Tool call identifier matching the provider/tool message ID
+        tool_call_id: String,
         /// Tool name
         name: String,
         /// Tool arguments (JSON format)
@@ -54,6 +56,8 @@ pub enum AgentEvent {
     },
     /// Tool execution completed
     ToolResult {
+        /// Tool call identifier matching the corresponding ToolCall
+        tool_call_id: String,
         /// Tool name
         name: String,
         /// Tool execution result (string format)
@@ -61,6 +65,8 @@ pub enum AgentEvent {
     },
     /// Tool execution error
     ToolError {
+        /// Tool call identifier matching the corresponding ToolCall
+        tool_call_id: String,
         /// Tool name
         name: String,
         /// Error message
@@ -68,6 +74,8 @@ pub enum AgentEvent {
     },
     /// Streaming tool progress event
     ToolStream {
+        /// Tool call identifier matching the corresponding ToolCall
+        tool_call_id: String,
         /// Tool name
         name: String,
         /// Stream event payload
@@ -214,8 +222,7 @@ impl AgentEvent {
     /// ```
     pub fn phase(&self) -> AgentPhase {
         match self {
-            AgentEvent::Token(_)
-            | AgentEvent::ThinkStart
+            AgentEvent::Token(_) | AgentEvent::ThinkStart
             | AgentEvent::ThinkEnd { .. }
             | AgentEvent::MemoryRecalled { .. }
             | AgentEvent::ContextCompressed { .. }

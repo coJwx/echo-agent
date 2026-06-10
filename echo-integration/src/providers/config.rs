@@ -410,7 +410,7 @@ impl ProviderFactory {
 // ── 内置 Provider 定义 ───────────────────────────────────────────────────────
 
 /// 已知 Provider 的默认 base_url 映射
-fn provider_base_url(provider: &str) -> Option<&'static str> {
+pub fn provider_base_url(provider: &str) -> Option<&'static str> {
     match provider.to_lowercase().as_str() {
         "openai" => Some("https://api.openai.com/v1/chat/completions"),
         "anthropic" => Some("https://api.anthropic.com/v1/messages"),

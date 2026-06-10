@@ -1,0 +1,11 @@
+# Rust 构建产物
+target/
+
+# Tauri 自动生成文件（schema、icon cache 等）
+gen/schemas/
+.tauri/
+
+# 本机 secrets，绝不提交
+.env
+.env.local
+WixTools/

@@ -427,7 +427,7 @@ impl ReactAgent {
     // ── Constructor helpers ───────────────────────────────────────────────────────
 
     fn build_system_prompt(config: &AgentConfig) -> String {
-        let mut prompt = if config.enable_tool && config.enable_cot {
+        let prompt = if config.enable_tool && config.enable_cot {
             format!(
                 "{}\n\n{}",
                 config.system_prompt.trim_end(),
@@ -438,13 +438,17 @@ impl ReactAgent {
         };
 
         #[cfg(feature = "project-rules")]
-        if config.auto_project_rules {
-            let wd = config
-                .working_dir
-                .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-            prompt = echo_core::project_rules::inject_rules(&prompt, &wd);
-        }
+        let prompt = {
+            let mut prompt = prompt;
+            if config.auto_project_rules {
+                let wd = config
+                    .working_dir
+                    .clone()
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                prompt = echo_core::project_rules::inject_rules(&prompt, &wd);
+            }
+            prompt
+        };
 
         prompt
     }

@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    background: theme("colors.bg.base");
+    color: theme("colors.ink.primary");
+    font-family: theme("fontFamily.sans");
+    font-family: Consolas, STDongGuanTi, monospace, theme("fontFamily.sans");
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: theme("colors.border.strong");
+    border-radius: 4px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-brand hover:bg-brand-hover text-white px-3 py-2 rounded-lg text-sm font-medium transition;
+  }
+
+  .btn-ghost {
+    @apply text-ink-secondary hover:text-ink-primary hover:bg-bg-hover px-3 py-2 rounded-lg text-sm transition;
+  }
+
+  .card {
+    @apply bg-bg-card border border-border-subtle rounded-xl;
+  }
+
+  .input-base {
+    @apply bg-bg-card border border-border-subtle rounded-lg px-3 py-2 text-sm text-ink-primary placeholder:text-ink-muted focus:border-brand focus:outline-none transition;
+  }
+
+  .readable-prose {
+    @apply text-[15px] leading-[1.58] text-ink-primary;
+  }
+
+  .readable-prose :where(p, ul, ol, pre) {
+    @apply my-2;
+  }
+
+  .readable-prose :where(code) {
+    @apply font-mono text-[0.95em] text-ink-primary;
+  }
+}

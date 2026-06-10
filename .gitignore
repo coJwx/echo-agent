@@ -18,3 +18,4 @@ echo-macros/target/
 echo-integration/target/
 echo-tools/target/
 */Cargo.lock
+echo-agent-models.yaml

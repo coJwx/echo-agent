@@ -23,6 +23,33 @@ pub(crate) struct ToolExecutionFailure {
     pub hook_messages: HookMessageBatches,
 }
 
+pub(crate) fn tool_observation_text(
+    tool_name: &str,
+    result: &crate::tools::ToolResult,
+) -> String {
+    if result.success {
+        if result.output.is_empty() {
+            format!("[Tool {tool_name} completed successfully with empty output]")
+        } else {
+            result.output.clone()
+        }
+    } else {
+        let message = result
+            .error
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .unwrap_or_else(|| {
+                if result.output.is_empty() {
+                    "Tool returned failure without an error message".to_string()
+                } else {
+                    result.output.clone()
+                }
+            });
+        format!("[Tool execution failed] {tool_name}: {message}")
+    }
+}
+
 impl ReactAgent {
     #[tracing::instrument(skip(self, input), fields(agent = %self.config.agent_name, tool.name = %tool_name))]
     pub(crate) fn execute_tool_feedback_raw<'a>(
@@ -399,13 +426,14 @@ impl ReactAgent {
                 }
             };
             let duration_ms = execution_start.elapsed().as_millis() as u64;
+            let observation = tool_observation_text(tool_name, &result);
 
             // Record ToolResult trace event
             self.record_trace_event(crate::trace::RunEvent::ToolResult {
                 call_id: call_id.clone(),
                 name: tool_name.to_string(),
-                success: true,
-                output_preview: Some(result.output.chars().take(200).collect()),
+                success: result.success,
+                output_preview: Some(observation.chars().take(200).collect()),
                 output_truncated: false,
                 duration_ms,
             })
@@ -449,7 +477,7 @@ impl ReactAgent {
                     .run_post_tool_use(
                         tool_name,
                         input,
-                        &result.output,
+                        &observation,
                         self.config.get_session_id().unwrap_or(""),
                     )
                     .await;
@@ -472,7 +500,7 @@ impl ReactAgent {
                 debug!(agent = %agent, tool = %tool_name, output = %result.output, "Tool output details");
 
                 // Run output guard checks to prevent malicious content injection
-                if let Some(guard_output) = self.check_tool_output_guard(&result.output).await {
+                if let Some(guard_output) = self.check_tool_output_guard(&observation).await {
                     debug!(agent = %agent, tool = %tool_name, "🛡️ Tool output filtered by guard");
                     for cb in callbacks.iter() {
                         cb.on_tool_end(&agent, tool_name, &guard_output).await;
@@ -487,20 +515,17 @@ impl ReactAgent {
                 }
 
                 for cb in callbacks.iter() {
-                    cb.on_tool_end(&agent, tool_name, &result.output).await;
+                    cb.on_tool_end(&agent, tool_name, &observation).await;
                 }
-                self.log_tool_call_audit(tool_name, input, &result.output, true, duration_ms)
+                self.log_tool_call_audit(tool_name, input, &observation, true, duration_ms)
                     .await;
                 Ok(ToolExecutionOutcome {
                     tool_result: None,
-                    output: result.output,
+                    output: observation,
                     hook_messages,
                 })
             } else {
-                let error_msg = result
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| result.output.clone());
+                let error_msg = tool_observation_text(tool_name, &result);
                 warn!(agent = %agent, tool = %tool_name, error = %error_msg, "💥 Tool execution failed");
                 let err = ReactError::from(ToolError::ExecutionFailed {
                     tool: tool_name.to_string(),

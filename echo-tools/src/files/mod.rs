@@ -116,5 +116,20 @@ fn normalize_path(path: &Path) -> PathBuf {
             c => components.push(c),
         }
     }
-    components.iter().collect()
+    if components.is_empty() {
+        PathBuf::from(".")
+    } else {
+        components.iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_path;
+    use std::path::Path;
+
+    #[test]
+    fn normalize_current_dir_keeps_current_dir() {
+        assert_eq!(normalize_path(Path::new(".")), Path::new("."));
+    }
 }
