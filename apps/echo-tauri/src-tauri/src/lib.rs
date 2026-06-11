@@ -7,15 +7,12 @@
 //! - `error`    : 应用层错误类型
 
 mod commands;
-mod error;
-mod events;
 mod provider;
-mod state;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use state::{AgentRegistry, AgentRegistryPaths};
+use echo_app_core::state::{AgentRegistry, AgentRegistryPaths};
 use tauri::Manager;
 
 /// Tauri 入口点。`mobile` build 期望这个签名。

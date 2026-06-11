@@ -19,3 +19,6 @@ echo-integration/target/
 echo-tools/target/
 */Cargo.lock
 echo-agent-models.yaml
+.echo-http-server/
+apps/echo-app-core/target
+apps/echo-http-server/target

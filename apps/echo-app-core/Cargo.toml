@@ -1,0 +1,29 @@
+[package]
+name = "echo-app-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "echo_app_core"
+path = "src/lib.rs"
+
+[dependencies]
+echo_agent = { path = "../..", default-features = false, features = ["mcp"] }
+echo_tools = { path = "../../echo-tools", default-features = false, features = ["files", "shell"] }
+echo_core = { path = "../../echo-core" }
+echo_state = { path = "../../echo-state", features = ["sqlite"] }
+echo_integration = { path = "../../echo-integration" }
+
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+thiserror = "1"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+
+[dev-dependencies]
+dotenvy = "0.15"
+tempfile = "3"

@@ -13,14 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-# 直接路径依赖根目录的 echo_agent（避开 crates.io 未发版本不一致问题）
-# 启用 mcp 特性：MCP 配置页要用 McpManager
-echo_agent = { path = "../../..", default-features = false, features = ["mcp"] }
-# 工具集：MVP 暴露 files (read_file/list_dir/write_file/...) + shell
-echo_tools = { path = "../../../echo-tools", default-features = false, features = ["files", "shell"] }
-echo_core  = { path = "../../../echo-core" }
-echo_state = { path = "../../../echo-state", features = ["sqlite"] }
-echo_integration = { path = "../../../echo-integration" }
+echo-app-core = { path = "../../echo-app-core" }
 
 tauri = { version = "2.0", features = [] }
 tauri-plugin-shell = "2.0"

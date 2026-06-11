@@ -788,16 +788,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
-name = "echo-tauri"
+name = "echo-app-core"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "dotenvy",
  "echo_agent",
  "echo_core",
  "echo_integration",
  "echo_state",
  "echo_tools",
+ "futures",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "echo-tauri"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dotenvy",
+ "echo-app-core",
  "futures",
  "once_cell",
  "serde",
