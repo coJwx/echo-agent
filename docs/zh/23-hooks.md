@@ -12,7 +12,7 @@ Hooks 允许在 Agent 生命周期的关键节点注入自定义行为。框架�
 
 ## Skills Hooks
 
-主 Hook 系统。通过 YAML 配置（`echo-agent.yaml` 或 SKILL.md frontmatter），由 `HookExecutor` 执行。
+主 Hook 系统。通过 YAML 配置（`ROOT_AGENT_DIR/config.yaml` 或 SKILL.md frontmatter），由 `HookExecutor` 执行。
 
 ### Hook 事件
 
@@ -242,4 +242,4 @@ let agent = ReactAgentBuilder::new()
     .build()?;
 ```
 
-Skills Hooks 通过 YAML 配置，从 `echo-agent.yaml` 或 SKILL.md 文件自动加载。
+Skills Hooks 通过 YAML 配置，从 `ROOT_AGENT_DIR/config.yaml` 或 SKILL.md 文件自动加载。

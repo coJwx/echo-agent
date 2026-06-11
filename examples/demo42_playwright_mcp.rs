@@ -221,7 +221,7 @@ fn require_configured_model(preferred: Option<&str>) -> echo_agent::error::Resul
         .err()
         .map(|e| format!("配置加载失败：{e}"))
         .unwrap_or_else(|| {
-            "请在 echo-agent.yaml 的 `models:` 中声明至少一个模型，并让 `model.name` 指向它。"
+            "请在 ROOT_AGENT_DIR/models.yaml 的 `providers.*.models` 中声明至少一个模型，并让 `model.name` 指向它。"
                 .to_string()
         });
     Err(echo_agent::error::ReactError::Other(format!(

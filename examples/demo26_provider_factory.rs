@@ -91,10 +91,9 @@ fn demo_from_config_file() -> echo_agent::error::Result<()> {
     println!("  使用 ProviderFactory::create(\"model_name\") 从配置文件加载\n");
 
     // 尝试从配置文件加载（可能失败，取决于用户是否有配置文件）
-    println!("  配置文件查找顺序：");
-    println!("    1. $ECHO_AGENT_CONFIG 环境变量");
-    println!("    2. ./echo-agent.yaml");
-    println!("    3. ~/.echo-agent/config.yaml\n");
+    println!("  模型配置文件位置：");
+    println!("    1. $ROOT_AGENT_DIR/models.yaml");
+    println!("    2. ~/.echo-agent/models.yaml（未设置 ROOT_AGENT_DIR 时）\n");
 
     // 列出已配置的模型
     let models = echo_agent::llm::config::Config::list_models();

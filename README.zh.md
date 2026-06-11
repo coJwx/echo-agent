@@ -255,7 +255,7 @@ echo-agent/
 ├── examples/            66 个可运行示例
 ├── docs/                双语文档（en + zh）
 ├── skills/              外部技能包（Markdown 格式）
-└── echo-agent.yaml      示例配置
+└── ~/.echo-agent/       默认用户配置目录（config.yaml / models.yaml）
 ```
 
 > **注意：** `echo-agent` 是纯库框架。开箱即用的应用（含 CLI、Web UI、WebSocket）请参见 [echo-agent-cli](https://github.com/EchoYue-lp/echo-agent-cli)。
@@ -264,7 +264,7 @@ echo-agent/
 
 ## 配置
 
-在项目根目录创建应用配置 `echo-agent.yaml`：
+在 `$ROOT_AGENT_DIR/config.yaml` 创建应用配置；未设置 `ROOT_AGENT_DIR` 时使用 `~/.echo-agent/config.yaml`：
 
 ```yaml
 model:
@@ -305,17 +305,29 @@ logging:
   level: info
 ```
 
-如需注册模型别名或自定义 provider endpoint，创建模型配置 `echo-agent-models.yaml`：
+如需注册模型别名或自定义 provider endpoint，创建模型配置 `ROOT_AGENT_DIR/models.yaml`：
 
 ```yaml
-models:
-  qwen3.7-max:
-    provider: dashscope
-    api_key: ${DASHSCOPE_API_KEY}
+providers:
+  dashscope:
+    name: 通义千问
+    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: ${DASHSCOPE_API_KEY}
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: qwen3.7-max
+        name: qwen3.7-max
 
-  deepseek-v4-flash:
-    provider: deepseek
-    api_key: ${DEEPSEEK_API_KEY}
+  deepseek:
+    name: DeepSeek
+    baseUrl: https://api.deepseek.com
+    apiKey: ${DEEPSEEK_API_KEY}
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: deepseek-v4-flash
+        name: deepseek-v4-flash
 
 embedding:
   base_url: https://api.openai.com
@@ -326,10 +338,10 @@ embedding:
 
 说明：
 
-- `echo-agent.yaml` 中的 `model:` / `agent:` / `channels:` / `mcp:` / `server:` / `logging:` 是 `echo_agent::config` 加载的应用运行时配置。
-- `echo-agent-models.yaml` 中的 `models:` 用于 `ProviderFactory`、`LlmConfig::from_model()` 以及基于配置的 LLM 客户端。
+- `ROOT_AGENT_DIR/config.yaml` 中的 `model:` / `agent:` / `channels:` / `mcp:` / `server:` / `logging:` 是 `echo_agent::config` 加载的应用运行时配置。
+- `ROOT_AGENT_DIR/models.yaml` 中的 `providers:` 用于 `ProviderFactory`、`LlmConfig::from_model()` 以及基于配置的 LLM 客户端。
 - `embedding:` 用于语义记忆 / 向量检索相关示例。
-- 内置 provider/model 规则可直接使用 `qwen3.6-plus`、`openai:gpt-5.5` 等，不一定需要 `models:` 文件。
+- 内置 provider/model 规则可直接使用 `qwen3.6-plus`、`openai:gpt-5.5` 等；自定义模型写入 `models.yaml`。
 
 通过环境变量设置密钥：
 

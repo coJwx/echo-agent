@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Braces,
+  ChevronLeft,
   Command,
+  Menu,
   MoreVertical,
   PanelRightOpen,
   RotateCcw,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { api } from "../../api";
 import type { SessionMeta } from "../../types";
 import { useChatSession } from "../../hooks/useChatSession";
 import MessageList from "./MessageList";
@@ -16,10 +19,22 @@ import MessageInput from "./MessageInput";
 interface ChatViewProps {
   active: string | null;
   current: SessionMeta | null;
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+  onSessionUpdated: (meta: SessionMeta) => void;
 }
 
-export default function ChatView({ active, current }: ChatViewProps) {
-  const [showInspector, setShowInspector] = useState(true);
+export default function ChatView({
+  active,
+  current,
+  sidebarCollapsed,
+  onToggleSidebar,
+  onSessionUpdated,
+}: ChatViewProps) {
+  const [showInspector, setShowInspector] = useState(false);
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [updatingModel, setUpdatingModel] = useState(false);
 
   const { messages, streaming, historyLoaded, historyError, send } =
     useChatSession(active);
@@ -29,22 +44,85 @@ export default function ChatView({ active, current }: ChatViewProps) {
     { icon: Command, label: "命令" },
     { icon: MoreVertical, label: "更多" },
   ];
+  const selectableModels = useMemo(() => {
+    const values = new Set(modelOptions);
+    if (current?.model) values.add(current.model);
+    return Array.from(values);
+  }, [current?.model, modelOptions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getProviderConfig()
+      .then((config) => {
+        if (!cancelled) {
+          setModelOptions(config.models.map((model) => model.name));
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setModelError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function updateModel(model: string) {
+    if (!active || !current || model === current.model || streaming) return;
+    setUpdatingModel(true);
+    setModelError(null);
+    try {
+      const next = await api.updateSessionModel(active, { model });
+      onSessionUpdated(next);
+    } catch (e) {
+      setModelError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUpdatingModel(false);
+    }
+  }
 
   return (
     <div className="relative flex min-h-0 flex-1 bg-[#111111]">
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 items-center justify-between border-b border-[#242424] bg-[#171717] px-5">
-          <div>
-            <div className="text-[15px] font-semibold text-ink-primary">
-              {current?.title ?? "选择或新建一个对话"}
-              {current && (
-                <span className="ml-2 text-[12px] text-ink-secondary">
-                  模型: {current.model}
-                </span>
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#2f2f2f] bg-[#222] text-ink-secondary transition hover:border-[#4a4a4a] hover:bg-[#2a2a2a] hover:text-ink-primary"
+              title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+              aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+              aria-expanded={!sidebarCollapsed}
+            >
+              {sidebarCollapsed ? (
+                <Menu className="h-4 w-4" strokeWidth={2} />
+              ) : (
+                <ChevronLeft className="h-4 w-4" strokeWidth={2} />
               )}
+            </button>
+            <div className="min-w-0 text-[15px] font-semibold text-ink-primary">
+              <div className="truncate">{current?.title ?? "选择或新建一个对话"}</div>
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {current && (
+              <label className="flex items-center gap-2 text-[12px] text-ink-secondary">
+                <span>模型</span>
+                <select
+                  className="h-8 max-w-52 rounded-lg border border-[#2f2f2f] bg-[#222] px-2 text-[12px] text-ink-primary outline-none transition hover:border-[#4a4a4a] focus:border-brand disabled:opacity-60"
+                  value={current.model}
+                  onChange={(event) => updateModel(event.target.value)}
+                  disabled={streaming || updatingModel || selectableModels.length === 0}
+                  title={modelError ? `模型列表加载失败: ${modelError}` : "切换模型"}
+                >
+                  {selectableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {streaming && (
               <span className="flex items-center gap-2 text-[12px] text-brand">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" />
@@ -66,15 +144,17 @@ export default function ChatView({ active, current }: ChatViewProps) {
                   </button>
                 );
               })}
-              {!showInspector && <button
-                type="button"
-                onClick={() => setShowInspector((visible) => !visible)}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2f2f2f] bg-[#222] text-ink-secondary transition hover:border-[#4a4a4a] hover:bg-[#2a2a2a] hover:text-ink-primary"
-                title={showInspector ? "隐藏属性面板" : "显示属性面板"}
-                aria-label={showInspector ? "隐藏属性面板" : "显示属性面板"}
-              >
-                <PanelRightOpen className="h-4 w-4" strokeWidth={2} />
-              </button>}
+              {!showInspector && (
+                <button
+                  type="button"
+                  onClick={() => setShowInspector((visible) => !visible)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2f2f2f] bg-[#222] text-ink-secondary transition hover:border-[#4a4a4a] hover:bg-[#2a2a2a] hover:text-ink-primary"
+                  title={showInspector ? "隐藏属性面板" : "显示属性面板"}
+                  aria-label={showInspector ? "隐藏属性面板" : "显示属性面板"}
+                >
+                  <PanelRightOpen className="h-4 w-4" strokeWidth={2} />
+                </button>
+              )}
             </div>
           </div>
         </header>

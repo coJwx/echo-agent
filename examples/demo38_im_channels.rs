@@ -55,7 +55,7 @@ async fn main() -> echo_agent::error::Result<()> {
     let mut manager = ChannelManager::new();
     let mut registered = Vec::new();
 
-    // 4. 注册 QQ Bot（优先读取 echo-agent.yaml，环境变量已在 apply_env_overrides 中覆盖）
+    // 4. 注册 QQ Bot（优先读取 ROOT_AGENT_DIR/config.yaml，环境变量已在 apply_env_overrides 中覆盖）
     if app_config.channels.qq.enabled
         && !app_config.channels.qq.app_id.is_empty()
         && !app_config.channels.qq.client_secret.is_empty()
@@ -69,7 +69,7 @@ async fn main() -> echo_agent::error::Result<()> {
         println!("  [+] 已注册 QQ Bot 通道");
     }
 
-    // 5. 注册飞书（优先读取 echo-agent.yaml，环境变量已在 apply_env_overrides 中覆盖）
+    // 5. 注册飞书（优先读取 ROOT_AGENT_DIR/config.yaml，环境变量已在 apply_env_overrides 中覆盖）
     if app_config.channels.feishu.enabled
         && !app_config.channels.feishu.app_id.is_empty()
         && !app_config.channels.feishu.app_secret.is_empty()

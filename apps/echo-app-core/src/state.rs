@@ -49,6 +49,11 @@ pub struct CreateSessionInput {
     pub max_tokens: Option<usize>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateSessionModelInput {
+    pub model: String,
+}
+
 /// JSON-backed storage for desktop session metadata.
 pub struct SessionMetaStore {
     path: PathBuf,
@@ -251,6 +256,43 @@ impl AgentRegistry {
             },
         );
 
+        Ok(meta)
+    }
+
+    pub async fn update_model(&self, session_id: &str, model: String) -> AppResult<SessionMeta> {
+        let model = model.trim().to_string();
+        if model.is_empty() {
+            return Err(AppError::Config("model 不能为空".to_string()));
+        }
+
+        let mut meta = {
+            let guard = self.sessions.read().await;
+            guard
+                .get(session_id)
+                .map(|slot| slot.meta.clone())
+                .ok_or_else(|| AppError::SessionNotFound(session_id.to_string()))?
+        };
+        meta.model = model;
+        meta.updated_at_ms = now_ms();
+
+        let handle = build_session_handle(
+            &meta,
+            self.checkpointer.clone(),
+            self.conversation_store.clone(),
+        )?;
+
+        {
+            let mut guard = self.sessions.write().await;
+            guard.insert(
+                session_id.to_string(),
+                SessionSlot {
+                    meta: meta.clone(),
+                    handle,
+                },
+            );
+        }
+
+        self.meta_store.upsert(meta.clone()).await?;
         Ok(meta)
     }
 

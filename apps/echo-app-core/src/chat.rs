@@ -247,12 +247,6 @@ mod tests {
             .unwrap()
             .to_path_buf();
         std::env::set_current_dir(&workspace_root).unwrap();
-        unsafe {
-            std::env::set_var(
-                "ECHO_AGENT_MODELS_CONFIG",
-                workspace_root.join("echo-agent-models.yaml"),
-            );
-        }
         let _ = dotenvy::from_path(workspace_root.join(".env"));
 
         write_jsonl(

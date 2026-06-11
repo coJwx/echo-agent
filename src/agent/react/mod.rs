@@ -425,7 +425,7 @@ impl ReactAgent {
 
     /// Create an Agent from a configuration file.
     ///
-    /// Searches for `echo-agent.yaml` and loads the config.
+    /// Loads `$ROOT_AGENT_DIR/config.yaml`, or `~/.echo-agent/config.yaml` when unset.
     ///
     /// ```no_run
     /// use echo_agent::agent::react::ReactAgent;

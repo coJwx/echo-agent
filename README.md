@@ -294,7 +294,7 @@ echo-agent/
 ├── examples/            64 runnable demos
 ├── docs/                Bilingual documentation (en + zh)
 ├── skills/              External skill packs (Markdown-based)
-└── echo-agent.yaml      Example configuration
+└── ~/.echo-agent/       Default user config directory (config.yaml / models.yaml)
 ```
 
 > **Note:** `echo-agent` is a library framework. For a ready-to-use application with CLI, Web UI, and WebSocket, see [echo-agent-cli](https://github.com/EchoYue-lp/echo-agent-cli).
@@ -303,27 +303,9 @@ echo-agent/
 
 ## Configuration
 
-Create `echo-agent.yaml` in your project root:
+Create `$ROOT_AGENT_DIR/config.yaml`, or `~/.echo-agent/config.yaml` when `ROOT_AGENT_DIR` is unset:
 
 ```yaml
-# Provider / model registry (used by ProviderFactory and config-backed clients)
-models:
-  qwen3.7-max:
-    provider: dashscope
-    api_key: ${DASHSCOPE_API_KEY}
-
-  deepseek-v4-flash:
-    provider: deepseek
-    api_key: ${DEEPSEEK_API_KEY}
-
-# Embedding config (used by semantic memory / vector search demos)
-embedding:
-  base_url: https://api.openai.com
-  api_key: ${OPENAI_API_KEY}
-  model: text-embedding-3-small
-  timeout_secs: 30
-
-# Runtime app config (used by examples such as IM channels)
 model:
   name: qwen3.7-max
   max_tokens: 4096
@@ -362,11 +344,42 @@ logging:
   level: info
 ```
 
+Create `$ROOT_AGENT_DIR/models.yaml`, or `~/.echo-agent/models.yaml` when `ROOT_AGENT_DIR` is unset:
+
+```yaml
+providers:
+  dashscope:
+    name: Qwen
+    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: ${DASHSCOPE_API_KEY}
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: qwen3.7-max
+        name: qwen3.7-max
+
+  deepseek:
+    name: DeepSeek
+    baseUrl: https://api.deepseek.com
+    apiKey: ${DEEPSEEK_API_KEY}
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: deepseek-v4-flash
+        name: deepseek-v4-flash
+
+embedding:
+  base_url: https://api.openai.com
+  api_key: ${OPENAI_API_KEY}
+  model: text-embedding-3-small
+  timeout_secs: 30
+```
+
 Notes:
 
-- `models:` is the registry used by `ProviderFactory`, `LlmConfig::from_model()`, and config-backed LLM clients.
-- `embedding:` is used by semantic memory / vector search examples.
 - `model:` / `agent:` / `channels:` / `mcp:` / `server:` / `logging:` are the framework runtime settings loaded by `echo_agent::config`.
+- `providers:` is the registry used by `ProviderFactory`, `LlmConfig::from_model()`, and config-backed LLM clients.
+- `embedding:` is used by semantic memory / vector search examples.
 
 Set secrets via environment variables:
 

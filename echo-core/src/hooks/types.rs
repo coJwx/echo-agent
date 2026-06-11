@@ -777,7 +777,7 @@ impl HookResult {
 pub enum HookSource {
     /// Hooks from a file-based skill.
     Skill(String),
-    /// Hooks from user configuration (echo-agent.yaml).
+    /// Hooks from user configuration (ROOT_AGENT_DIR/config.yaml).
     UserConfig,
     /// Hooks from an installed plugin.
     Plugin(String),

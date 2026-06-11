@@ -7,17 +7,17 @@
 //!
 //! # 前置条件
 //!
-//! 在 `echo-agent.yaml` 中把 `model.name` 指向一个支持视觉的模型，并在
-//! `models.*` 中声明对应 provider 配置。密钥仍可通过 YAML 里的 `${ENV}` 注入。
+//! 在 `ROOT_AGENT_DIR/config.yaml` 中把 `model.name` 指向一个支持视觉的模型，并在
+//! `ROOT_AGENT_DIR/models.yaml` 的 `providers.*.models` 中声明对应 provider 配置。密钥仍可通过 YAML 里的 `${ENV}` 注入。
 //!
 //! # 运行方式
 //!
 //! ```bash
-//! # 使用默认搜索路径中的 echo-agent.yaml
+//! # 使用默认搜索路径中的 ROOT_AGENT_DIR/config.yaml
 //! cargo run --example demo36_multimodal
 //!
 //! # 或者显式指定配置文件路径
-//! ECHO_AGENT_CONFIG=/path/to/echo-agent.yaml cargo run --example demo36_multimodal
+//! ROOT_AGENT_DIR=/path/to/.echo-agent cargo run --example demo36_multimodal
 //! ```
 use echo_agent::config::load_config;
 use echo_agent::prelude::*;
@@ -142,13 +142,13 @@ fn require_yaml_model() -> echo_agent::error::Result<String> {
 
     if model_name.is_empty() {
         return Err(echo_agent::error::ReactError::Other(
-            "demo36 需要在 echo-agent.yaml 中设置 `model.name`，并让它指向 `models.*` 里声明的视觉模型。".to_string(),
+            "demo36 需要在 ROOT_AGENT_DIR/config.yaml 中设置 `model.name`，并让它指向 ROOT_AGENT_DIR/models.yaml 里声明的视觉模型。".to_string(),
         ));
     }
 
     if !echo_agent::llm::config::Config::has_model(&model_name) {
         return Err(echo_agent::error::ReactError::Other(format!(
-            "demo36 当前 `model.name = {model_name}`，但它没有在 `echo-agent.yaml` 的 `models:` 中声明。请先在 YAML 中配置同名模型，并确保它支持视觉输入。"
+            "demo36 当前 `model.name = {model_name}`，但它没有在 `ROOT_AGENT_DIR/models.yaml` 的 `providers.*.models` 中声明。请先在 YAML 中配置同名模型，并确保它支持视觉输入。"
         )));
     }
 

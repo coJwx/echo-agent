@@ -6,6 +6,7 @@
 //! | `Project` | `.echo-agent/plugins/` | Team-shared via VCS |
 //! | `Local` | `.echo-agent/plugins.local/` | Project-private, gitignored |
 
+use crate::utils::paths::root_agent_dir;
 use std::path::{Path, PathBuf};
 
 /// Where a plugin is installed and who can access it.
@@ -31,10 +32,7 @@ impl PluginScope {
     /// - `Local`: `<project_root>/.echo-agent/plugins.local/`
     pub fn resolve_dir(&self, project_root: Option<&Path>) -> PathBuf {
         match self {
-            Self::User => {
-                let home = dirs_or_default();
-                home.join(".echo-agent").join("plugins")
-            }
+            Self::User => root_agent_dir().join("plugins"),
             Self::Project => {
                 let root = project_root.unwrap_or_else(|| Path::new("."));
                 root.join(".echo-agent").join("plugins")
@@ -121,13 +119,6 @@ impl std::fmt::Display for InstallSource {
             }
         }
     }
-}
-
-/// Get the user's home directory, falling back to `~` expansion.
-fn dirs_or_default() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("~"))
 }
 
 #[cfg(test)]

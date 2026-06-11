@@ -5,12 +5,16 @@ use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 
 use crate::error::{AppError, AppResult};
+use echo_core::utils::paths::root_agent_dir;
 use echo_integration::providers::{ProviderFactory, config::provider_base_url};
+
+const API_KEY_MASK: &str = "******";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderModel {
     pub name: String,
     pub provider: Option<String>,
+    pub provider_name: Option<String>,
     pub base_url: Option<String>,
     pub api_key: String,
     pub model: Option<String>,
@@ -19,6 +23,7 @@ pub struct ProviderModel {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderGroup {
     pub name: String,
+    pub display_name: String,
     pub models: Vec<ProviderModel>,
 }
 
@@ -56,25 +61,42 @@ fn read_provider_config_from_path(path: &Path) -> AppResult<ProviderConfig> {
 
     if let Some(mapping) = root
         .as_mapping()
-        .and_then(|root| root.get(Value::String("models".to_string())))
+        .and_then(|root| root.get(Value::String("providers".to_string())))
         .and_then(Value::as_mapping)
     {
-        for (key, value) in mapping {
-            let Some(name) = key.as_str() else {
+        for (provider_key, value) in mapping {
+            let Some(provider_id) = provider_key.as_str() else {
                 continue;
             };
-            let Some(entry) = value.as_mapping() else {
+            let Some(provider_entry) = value.as_mapping() else {
                 continue;
             };
-            let base_url = string_field(entry, "base_url");
-            let provider = string_field(entry, "provider").or_else(|| infer_provider(&base_url));
-            models.push(ProviderModel {
-                name: name.to_string(),
-                provider,
-                base_url,
-                api_key: string_field(entry, "api_key").unwrap_or_default(),
-                model: string_field(entry, "model"),
-            });
+            let base_url = string_field(provider_entry, "baseUrl")
+                .or_else(|| string_field(provider_entry, "base_url"));
+            let provider_name =
+                string_field(provider_entry, "name").unwrap_or_else(|| provider_id.to_string());
+
+            if let Some(model_entries) = provider_entry
+                .get(Value::String("models".to_string()))
+                .and_then(Value::as_sequence)
+            {
+                for model_entry in model_entries {
+                    let Some(model_entry) = model_entry.as_mapping() else {
+                        continue;
+                    };
+                    let Some(model_id) = string_field(model_entry, "id") else {
+                        continue;
+                    };
+                    models.push(ProviderModel {
+                        name: model_id,
+                        provider: Some(provider_id.to_string()),
+                        provider_name: Some(provider_name.clone()),
+                        base_url: base_url.clone(),
+                        api_key: API_KEY_MASK.to_string(),
+                        model: string_field(model_entry, "name"),
+                    });
+                }
+            }
         }
     }
 
@@ -95,7 +117,17 @@ fn read_provider_config_from_path(path: &Path) -> AppResult<ProviderConfig> {
 
     let providers = grouped
         .into_iter()
-        .map(|(name, models)| ProviderGroup { name, models })
+        .map(|(name, models)| {
+            let display_name = models
+                .first()
+                .and_then(|model| model.provider_name.clone())
+                .unwrap_or_else(|| name.clone());
+            ProviderGroup {
+                name,
+                display_name,
+                models,
+            }
+        })
         .collect();
 
     Ok(ProviderConfig {
@@ -112,75 +144,143 @@ fn save_model_to_path(path: &Path, input: ProviderModelInput) -> AppResult<()> {
         return Err(AppError::Config("model key 不能为空".to_string()));
     }
 
-    let api_key = input.api_key.trim();
-    if api_key.is_empty() {
-        return Err(AppError::Config("api_key 不能为空".to_string()));
-    }
+    let requested_api_key = input.api_key.trim();
 
     let provider = input
         .provider
         .as_deref()
         .map(str::trim)
-        .filter(|v| !v.is_empty());
+        .filter(|v| !v.is_empty())
+        .unwrap_or("custom");
     let base_url = input
         .base_url
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
-        .or_else(|| provider.and_then(provider_base_url).map(str::to_string));
+        .or_else(|| provider_base_url(provider).map(provider_base_from_endpoint));
 
-    if provider.is_none() && base_url.is_none() {
+    let Some(base_url) = base_url else {
         return Err(AppError::Config(
             "请选择 provider 或填写 base_url".to_string(),
         ));
-    }
+    };
 
     let mut root = read_yaml_root(path)?;
     if !root.is_mapping() {
         root = Value::Mapping(Mapping::new());
     }
     let root_map = root.as_mapping_mut().expect("root mapping");
-    let models_key = Value::String("models".to_string());
-    if !root_map.contains_key(&models_key) {
-        root_map.insert(models_key.clone(), Value::Mapping(Mapping::new()));
+    let providers_key = Value::String("providers".to_string());
+    if !root_map.contains_key(&providers_key) {
+        root_map.insert(providers_key.clone(), Value::Mapping(Mapping::new()));
     }
 
-    let models = root_map
-        .get_mut(&models_key)
+    let providers = root_map
+        .get_mut(&providers_key)
         .and_then(Value::as_mapping_mut)
-        .ok_or_else(|| AppError::Config("models 必须是 YAML map".to_string()))?;
+        .ok_or_else(|| AppError::Config("providers 必须是 YAML map".to_string()))?;
 
-    let mut entry = Mapping::new();
-    if let Some(provider) = provider {
-        entry.insert(
-            Value::String("provider".to_string()),
+    let provider_key = Value::String(provider.to_string());
+    let existing_api_key = providers
+        .get(&provider_key)
+        .and_then(Value::as_mapping)
+        .and_then(|provider| {
+            string_field(provider, "apiKey").or_else(|| string_field(provider, "api_key"))
+        });
+    let api_key = if requested_api_key == API_KEY_MASK {
+        existing_api_key
+            .as_deref()
+            .ok_or_else(|| AppError::Config("api_key 不能为空".to_string()))?
+    } else if requested_api_key.is_empty() {
+        return Err(AppError::Config("api_key 不能为空".to_string()));
+    } else {
+        requested_api_key
+    };
+
+    if !providers.contains_key(&provider_key) {
+        let mut provider_entry = Mapping::new();
+        provider_entry.insert(
+            Value::String("name".to_string()),
             Value::String(provider.to_string()),
         );
-    }
-    if let Some(base_url) = base_url {
-        entry.insert(
-            Value::String("base_url".to_string()),
-            Value::String(base_url),
+        provider_entry.insert(
+            Value::String("baseUrl".to_string()),
+            Value::String(base_url.clone()),
         );
-    }
-    entry.insert(
-        Value::String("api_key".to_string()),
-        Value::String(api_key.to_string()),
-    );
-    if let Some(model) = input
-        .model
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        entry.insert(
-            Value::String("model".to_string()),
-            Value::String(model.to_string()),
+        provider_entry.insert(
+            Value::String("apiKey".to_string()),
+            Value::String(api_key.to_string()),
         );
+        provider_entry.insert(
+            Value::String("api".to_string()),
+            Value::String("openai-completions".to_string()),
+        );
+        provider_entry.insert(
+            Value::String("auth".to_string()),
+            Value::String("apiKey".to_string()),
+        );
+        provider_entry.insert(
+            Value::String("models".to_string()),
+            Value::Sequence(Vec::new()),
+        );
+        providers.insert(provider_key.clone(), Value::Mapping(provider_entry));
     }
 
-    models.insert(Value::String(name.to_string()), Value::Mapping(entry));
+    let provider_entry = providers
+        .get_mut(&provider_key)
+        .and_then(Value::as_mapping_mut)
+        .ok_or_else(|| AppError::Config("provider 必须是 YAML map".to_string()))?;
+
+    provider_entry.insert(
+        Value::String("baseUrl".to_string()),
+        Value::String(base_url.clone()),
+    );
+    provider_entry.insert(
+        Value::String("apiKey".to_string()),
+        Value::String(api_key.to_string()),
+    );
+    provider_entry
+        .entry(Value::String("api".to_string()))
+        .or_insert_with(|| Value::String("openai-completions".to_string()));
+    provider_entry
+        .entry(Value::String("auth".to_string()))
+        .or_insert_with(|| Value::String("apiKey".to_string()));
+    provider_entry
+        .entry(Value::String("models".to_string()))
+        .or_insert_with(|| Value::Sequence(Vec::new()));
+
+    let mut entry = Mapping::new();
+    entry.insert(
+        Value::String("id".to_string()),
+        Value::String(name.to_string()),
+    );
+    entry.insert(
+        Value::String("name".to_string()),
+        Value::String(
+            input
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or(name)
+                .to_string(),
+        ),
+    );
+    if let Some(models) = provider_entry
+        .get_mut(Value::String("models".to_string()))
+        .and_then(Value::as_sequence_mut)
+    {
+        models.retain(|model| {
+            model
+                .as_mapping()
+                .and_then(|mapping| string_field(mapping, "id"))
+                .is_none_or(|id| id != name)
+        });
+        models.push(Value::Mapping(entry));
+    } else {
+        return Err(AppError::Config("provider.models 必须是 YAML list".to_string()));
+    }
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| AppError::PersistenceWrite(e.to_string()))?;
@@ -211,28 +311,14 @@ fn string_field(mapping: &Mapping, key: &str) -> Option<String> {
 }
 
 fn models_config_path() -> PathBuf {
-    if let Ok(path) = std::env::var("ECHO_AGENT_MODELS_CONFIG")
-        && !path.trim().is_empty()
-    {
-        return PathBuf::from(path);
-    }
-
-    let cwd_path = PathBuf::from("echo-agent-models.yaml");
-    if cwd_path.is_file() {
-        return cwd_path;
-    }
-
-    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
-        return PathBuf::from(home).join(".echo-agent").join("models.yaml");
-    }
-
-    cwd_path
+    root_agent_dir().join("models.yaml")
 }
 
 fn supported_provider_names() -> Vec<String> {
     let mut providers = ProviderFactory::supported_providers()
         .iter()
-        .map(|provider| (*provider).to_string())
+        .filter_map(|provider| canonical_provider_key(provider))
+        .map(str::to_string)
         .collect::<Vec<_>>();
     providers.push("custom".to_string());
     providers.sort();
@@ -240,28 +326,27 @@ fn supported_provider_names() -> Vec<String> {
     providers
 }
 
-fn infer_provider(base_url: &Option<String>) -> Option<String> {
-    let lower = base_url.as_ref()?.to_ascii_lowercase();
-    let provider = if lower.contains("openai.com") {
-        "openai"
-    } else if lower.contains("anthropic.com") {
-        "anthropic"
-    } else if lower.contains("deepseek.com") {
-        "deepseek"
-    } else if lower.contains("dashscope.aliyuncs.com") {
-        "dashscope"
-    } else if lower.contains("moonshot.cn") {
-        "moonshot"
-    } else if lower.contains("bigmodel.cn") {
-        "zhipu"
-    } else if lower.contains("localhost:11434") || lower.contains("ollama") {
-        "ollama"
-    } else if lower.contains("generativelanguage.googleapis.com") {
-        "gemini"
-    } else {
-        "custom"
-    };
-    Some(provider.to_string())
+fn provider_base_from_endpoint(endpoint: &str) -> String {
+    endpoint
+        .trim_end_matches('/')
+        .strip_suffix("/chat/completions")
+        .unwrap_or(endpoint.trim_end_matches('/'))
+        .to_string()
+}
+
+fn canonical_provider_key(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("openai"),
+        "anthropic" => Some("anthropic"),
+        "deepseek" => Some("deepseek"),
+        "dashscope" | "qwen" | "aliyun" => Some("dashscope"),
+        "moonshot" | "kimi" => Some("moonshot"),
+        "zhipu" | "glm" => Some("zhipu"),
+        "ollama" => Some("ollama"),
+        "gemini" | "google" => Some("gemini"),
+        "azure" | "azure_openai" => Some("azure_openai"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -271,18 +356,29 @@ mod tests {
     #[test]
     fn reads_provider_groups_from_models_yaml() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("echo-agent-models.yaml");
+        let path = dir.path().join("models.yaml");
         std::fs::write(
             &path,
             r#"
-models:
-  glm-5.1:
-    provider: zhipu
-    api_key: ${ZHIPU_API_KEY}
-    model: glm-5.1
-  qwen-plus:
-    provider: dashscope
-    api_key: ${DASHSCOPE_API_KEY}
+providers:
+  zhipu:
+    name: 智谱
+    baseUrl: https://open.bigmodel.cn/api/paas/v4
+    apiKey: ${ZHIPU_API_KEY}
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: glm-5.1
+        name: glm-5.1
+  dashscope:
+    name: 通义千问
+    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: ${DASHSCOPE_API_KEY}
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: qwen-plus
+        name: qwen-plus
 "#,
         )
         .unwrap();
@@ -292,8 +388,11 @@ models:
         assert_eq!(config.models.len(), 2);
         assert_eq!(config.providers.len(), 2);
         assert_eq!(config.providers[0].name, "dashscope");
+        assert_eq!(config.providers[0].display_name, "通义千问");
         assert_eq!(config.providers[0].models[0].name, "qwen-plus");
+        assert_eq!(config.providers[0].models[0].api_key, API_KEY_MASK);
         assert_eq!(config.providers[1].name, "zhipu");
+        assert_eq!(config.providers[1].display_name, "智谱");
         assert_eq!(
             config.providers[1].models[0].model.as_deref(),
             Some("glm-5.1")
@@ -303,8 +402,8 @@ models:
     #[test]
     fn saves_new_model_to_models_yaml() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("echo-agent-models.yaml");
-        std::fs::write(&path, "models: {}\n").unwrap();
+        let path = dir.path().join("models.yaml");
+        std::fs::write(&path, "providers: {}\n").unwrap();
 
         save_model_to_path(
             &path,
@@ -327,9 +426,59 @@ models:
         assert_eq!(model.provider.as_deref(), Some("openai"));
         assert_eq!(
             model.base_url.as_deref(),
-            Some("https://api.openai.com/v1/chat/completions")
+            Some("https://api.openai.com/v1")
         );
-        assert_eq!(model.api_key, "${OPENAI_API_KEY}");
+        assert_eq!(model.api_key, API_KEY_MASK);
+
+        let yaml = std::fs::read_to_string(&path).unwrap();
+        assert!(yaml.contains("providers:"));
+        assert!(yaml.contains("baseUrl: https://api.openai.com/v1"));
+        assert!(yaml.contains("apiKey: ${OPENAI_API_KEY}"));
+        assert!(yaml.contains("api: openai-completions"));
+        assert!(yaml.contains("auth: apiKey"));
+        assert!(yaml.contains("id: gpt-4o-mini"));
+    }
+
+    #[test]
+    fn saves_masked_api_key_without_overwriting_existing_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("models.yaml");
+        std::fs::write(
+            &path,
+            r#"
+providers:
+  hsapi:
+    name: 火山引擎
+    baseUrl: https://ark.cn-beijing.volces.com/api/coding/v3
+    apiKey: ark-secret
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: glm-5.1
+        name: glm-5.1
+"#,
+        )
+        .unwrap();
+
+        save_model_to_path(
+            &path,
+            ProviderModelInput {
+                name: "glm-5.1".to_string(),
+                provider: Some("hsapi".to_string()),
+                base_url: Some("https://ark.cn-beijing.volces.com/api/coding/v3".to_string()),
+                api_key: API_KEY_MASK.to_string(),
+                model: Some("glm-5.1".to_string()),
+            },
+        )
+        .unwrap();
+
+        let yaml = std::fs::read_to_string(&path).unwrap();
+        assert!(yaml.contains("apiKey: ark-secret"));
+
+        let config = read_provider_config_from_path(&path).unwrap();
+        assert_eq!(config.providers[0].name, "hsapi");
+        assert_eq!(config.providers[0].display_name, "火山引擎");
+        assert_eq!(config.providers[0].models[0].api_key, API_KEY_MASK);
     }
 
     #[test]

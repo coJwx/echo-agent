@@ -1,13 +1,12 @@
 //! Unified configuration management.
 //!
-//! Loads global configuration from `echo-agent.yaml`.
+//! Loads global configuration from the Echo Agent root directory.
 //!
-//! # Config File Search Order
+//! # Config File Location
 //!
 //! 1. `--config <PATH>` (explicit path)
-//! 2. `./echo-agent.yaml` (current directory)
-//! 3. `~/.echo-agent/config.yaml` (user home)
-//! 4. Built-in defaults (no file required)
+//! 2. `$ROOT_AGENT_DIR/config.yaml`, or `~/.echo-agent/config.yaml` when unset
+//! 3. Built-in defaults (no file required)
 //!
 //! # Quick Start
 //!
@@ -37,6 +36,7 @@
 
 use crate::agent::AgentConfig;
 use crate::skills::hooks::HooksDefinition;
+use echo_core::utils::paths::root_agent_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -242,7 +242,7 @@ impl Default for AgentYamlConfig {
             enable_tools: true,
             enable_memory: true,
             enable_human_in_loop: true,
-            memory_path: "~/.echo-agent/memory".to_string(),
+            memory_path: root_agent_dir().join("memory").display().to_string(),
             tool_timeout_ms: 120_000,
             token_limit: 0,
             compress_strategy: "sliding".to_string(),
@@ -429,17 +429,7 @@ pub struct WebhookEntryConfig {
 
 /// Config file search paths.
 pub fn config_search_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(explicit) = std::env::var("ECHO_AGENT_CONFIG")
-        && !explicit.trim().is_empty()
-    {
-        paths.push(PathBuf::from(explicit));
-    }
-    paths.push(PathBuf::from("echo-agent.yaml"));
-    if let Ok(home) = std::env::var("HOME") {
-        paths.push(PathBuf::from(home).join(".echo-agent").join("config.yaml"));
-    }
-    paths
+    vec![root_agent_dir().join("config.yaml")]
 }
 
 fn load_from_file(path: &PathBuf) -> Result<AppConfig, String> {
@@ -450,12 +440,10 @@ fn load_from_file(path: &PathBuf) -> Result<AppConfig, String> {
 
 /// Persist an [`AppConfig`] back to the first writable config file.
 ///
-/// Search order: `$ECHO_AGENT_CONFIG` → `./echo-agent.yaml` → `~/.echo-agent/config.yaml`.
-/// The first existing file (or first path if none exist) is overwritten.
+/// Writes to `$ROOT_AGENT_DIR/config.yaml`, or `~/.echo-agent/config.yaml` when unset.
 pub fn save_config(config: &AppConfig) -> std::result::Result<(), String> {
     let search = config_search_paths();
-    // Prefer an already-existing file; otherwise use the first path (./echo-agent.yaml)
-    let target = search.iter().find(|p| p.exists()).unwrap_or(&search[1]);
+    let target = &search[0];
     let yaml =
         serde_yaml_ng::to_string(config).map_err(|e| format!("serialization failed: {e}"))?;
     let header = "# Echo Agent Configuration\n# Auto-saved via Web API or CLI\n\n";
@@ -535,30 +523,6 @@ pub fn apply_env_overrides(config: &mut AppConfig) {
 mod tests {
     use super::*;
 
-    /// RAII guard that sets an env var and restores (or removes) it on drop.
-    struct EnvGuard {
-        key: &'static str,
-        old: Option<String>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, val: &str) -> Self {
-            let old = std::env::var(key).ok();
-            // SAFETY: test code, single-threaded via cargo test harness
-            unsafe { std::env::set_var(key, val) };
-            Self { key, old }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match &self.old {
-                Some(v) => unsafe { std::env::set_var(self.key, v) },
-                None => unsafe { std::env::remove_var(self.key) },
-            }
-        }
-    }
-
     #[test]
     fn test_default_config() {
         let config = AppConfig::default();
@@ -607,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_config_honors_echo_agent_config_env() {
+    fn test_load_config_honors_explicit_path_argument() {
         let temp_path =
             std::env::temp_dir().join(format!("echo-agent-config-{}.yaml", std::process::id()));
         std::fs::write(
@@ -619,9 +583,7 @@ model:
         )
         .unwrap();
 
-        let _guard = EnvGuard::set("ECHO_AGENT_CONFIG", temp_path.to_str().unwrap());
-        let config = load_config(None);
-        drop(_guard);
+        let config = load_config(temp_path.to_str());
         std::fs::remove_file(&temp_path).unwrap();
 
         assert_eq!(config.model.name, "qwen3.7-plus");

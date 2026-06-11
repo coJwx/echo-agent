@@ -5,7 +5,7 @@
 echo-agent 提供两种配置方式：
 
 1. **Rust API** — `AgentConfig` + `ReactAgentBuilder`，编程式配置
-2. **YAML 文件** — `echo-agent.yaml`，声明式配置
+2. **YAML 文件** — `ROOT_AGENT_DIR/config.yaml`，声明式配置
 
 ---
 
@@ -348,14 +348,13 @@ pub enum SnapshotPolicy {
 
 ## YAML 配置
 
-echo-agent 支持通过 `echo-agent.yaml` 进行声明式配置。
+echo-agent 支持通过 `ROOT_AGENT_DIR/config.yaml` 进行声明式配置。
 
-### 文件搜索顺序
+### 配置文件位置
 
-1. `$ECHO_AGENT_CONFIG` 环境变量
-2. `./echo-agent.yaml`（当前目录）
-3. `~/.echo-agent/config.yaml`（用户主目录）
-4. 内置默认值
+1. `$ROOT_AGENT_DIR/config.yaml`
+2. 未设置 `ROOT_AGENT_DIR` 时使用 `~/.echo-agent/config.yaml`
+3. 文件不存在时使用内置默认值
 
 ### 完整示例
 
@@ -414,7 +413,7 @@ logging:
 
 | 环境变量 | 效果 |
 |---------|------|
-| `ECHO_AGENT_CONFIG` | 显式配置文件路径 |
+| `ROOT_AGENT_DIR` | Echo Agent 配置目录；应用配置读取其中的 `config.yaml` |
 | `QQ_APP_ID` | 设置 QQ 渠道 app_id，自动启用 QQ |
 | `QQ_CLIENT_SECRET` | 设置 QQ 渠道 client_secret |
 | `FEISHU_APP_ID` | 设置飞书渠道 app_id，自动启用飞书 |
@@ -524,7 +523,7 @@ let agent = ReactAgentBuilder::full_featured("qwen3-max", "assistant", "你是�
 ### 基于 YAML 的配置
 
 ```rust
-let config = AppConfig::load()?;  // 加载 echo-agent.yaml
+let config = AppConfig::load()?;  // 加载 ROOT_AGENT_DIR/config.yaml
 ```
 
 ---

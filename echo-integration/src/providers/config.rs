@@ -4,26 +4,27 @@
 //!
 //! ## 1. YAML 配置文件（推荐）
 //!
-//! 查找顺序：`$ECHO_AGENT_MODELS_CONFIG` → `./echo-agent-models.yaml` → `~/.echo-agent/models.yaml`，
-//! 并兼容旧路径 `$ECHO_AGENT_CONFIG` / `./echo-agent.yaml` / `~/.echo-agent/config.yaml`。
-//! 旧路径如果是应用配置（没有顶层 `models`）会被跳过，避免与应用配置冲突。
+//! 查找路径：`$ROOT_AGENT_DIR/models.yaml`，未设置 `ROOT_AGENT_DIR` 时使用
+//! `~/.echo-agent/models.yaml`。
 //!
 //! ```yaml
-//! models:
-//!   qwen3.7-max:
-//!     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
-//!     api_key: sk-xxx
-//!
-//!   deepseek-v4-flash:
-//!     base_url: https://api.deepseek.com/chat/completions
-//!     api_key: ${DS_API_KEY}   # 支持引用环境变量
-//!
-//!   gpt-5.5:
-//!     provider: openai          # 内置 Provider 快捷方式
-//!     api_key: ${OPENAI_API_KEY}
+//! providers:
+//!   yyapi:
+//!     name: YY聚合模型
+//!     baseUrl: http://10.1.80.30:3000/v1
+//!     apiKey: ${YY_API_KEY}   # 支持引用环境变量
+//!     api: openai-completions
+//!     auth: apiKey
+//!     models:
+//!       - id: kimi-for-coding
+//!         name: kimi-for-coding
+//!         contextWindow: 256000
+//!         maxTokens: 32000
+//!         input: [text, image]
 //! ```
 //!
 use echo_core::error::{ConfigError, Result};
+use echo_core::utils::paths::root_agent_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -459,36 +460,74 @@ fn detect_provider_from_url(url: &str) -> LlmProvider {
 /// 配置文件根结构
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
-    models: HashMap<String, ModelEntry>,
+    providers: HashMap<String, ProviderEntry>,
     #[serde(default)]
     embedding: Option<EmbeddingEntry>,
 }
 
-/// 单个模型的配置条目
+/// 单个供应商配置条目
 #[derive(Deserialize)]
-struct ModelEntry {
-    /// API 端点 URL（与 `provider` 二选一）
+struct ProviderEntry {
+    /// 展示名称
     #[serde(default)]
-    base_url: Option<String>,
+    name: Option<String>,
+    /// API 基础 URL
+    #[serde(alias = "baseUrl", alias = "base_url")]
+    base_url: String,
     /// API 密钥
+    #[serde(alias = "apiKey", alias = "api_key")]
     api_key: String,
-    /// 实际发送给 API 的模型名称（默认使用配置 key）
-    #[serde(default)]
-    model: Option<String>,
-    /// 内置 Provider 名称（如 "openai"、"deepseek"），自动填充 base_url
-    #[serde(default)]
-    provider: Option<String>,
+    /// API 协议类型，例如 `openai-completions`
+    api: ProviderApiKind,
+    /// 鉴权方式，例如 `apiKey`
+    auth: ProviderAuthKind,
+    /// 该供应商下的模型列表
+    models: Vec<ProviderModelEntry>,
 }
 
-impl std::fmt::Debug for ModelEntry {
+impl std::fmt::Debug for ProviderEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModelEntry")
+        f.debug_struct("ProviderEntry")
+            .field("name", &self.name)
             .field("base_url", &self.base_url)
             .field("api_key", &"[REDACTED]")
-            .field("model", &self.model)
-            .field("provider", &self.provider)
+            .field("api", &self.api)
+            .field("auth", &self.auth)
+            .field("models", &self.models)
             .finish()
     }
+}
+
+/// Provider API 类型
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ProviderApiKind {
+    OpenaiCompletions,
+}
+
+/// Provider 鉴权方式
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum ProviderAuthKind {
+    ApiKey,
+}
+
+/// Provider 下的单个模型条目
+#[derive(Debug, Deserialize)]
+struct ProviderModelEntry {
+    /// 配置和调用使用的模型 ID
+    id: String,
+    /// 实际发送给 API 的模型名
+    name: String,
+    /// 上下文窗口大小
+    #[serde(default, alias = "contextWindow", alias = "context_window")]
+    context_window: Option<usize>,
+    /// 最大输出 token
+    #[serde(default, alias = "maxTokens", alias = "max_tokens")]
+    max_tokens: Option<usize>,
+    /// 输入模态
+    #[serde(default)]
+    input: Vec<String>,
 }
 
 /// Embedding 配置条目
@@ -604,60 +643,20 @@ impl Config {
         }
 
         Err(ConfigError::ConfigFileError(
-            "未找到模型配置文件，请提供 echo-agent-models.yaml；环境变量仅支持通过 `${VAR}` 在 YAML 中注入值".to_string(),
+            format!(
+                "未找到模型配置文件，请提供 {}；环境变量仅支持通过 `${{VAR}}` 在 YAML 中注入值",
+                root_agent_dir().join("models.yaml").display()
+            ),
         )
         .into())
     }
 
     /// 查找配置文件路径
     ///
-    /// 查找顺序：
-    /// 1. `$ECHO_AGENT_MODELS_CONFIG` 环境变量指定的模型配置路径
-    /// 2. `./echo-agent-models.yaml`（当前目录）
-    /// 3. `~/.echo-agent/models.yaml`（用户目录）
-    /// 4. 兼容旧路径：`$ECHO_AGENT_CONFIG`、`./echo-agent.yaml`、`~/.echo-agent/config.yaml`
+    /// 固定读取 `$ROOT_AGENT_DIR/models.yaml`，未设置 `ROOT_AGENT_DIR` 时使用
+    /// `~/.echo-agent/models.yaml`。
     fn config_file_paths() -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-
-        if let Ok(path) = std::env::var("ECHO_AGENT_MODELS_CONFIG") {
-            let p = PathBuf::from(&path);
-            if p.exists() {
-                paths.push(p);
-            }
-        }
-
-        let local = PathBuf::from("./echo-agent-models.yaml");
-        if local.exists() {
-            paths.push(local);
-        }
-
-        if let Ok(home) = std::env::var("HOME") {
-            let global = PathBuf::from(&home).join(".echo-agent").join("models.yaml");
-            if global.exists() {
-                paths.push(global);
-            }
-        }
-
-        if let Ok(path) = std::env::var("ECHO_AGENT_CONFIG") {
-            let p = PathBuf::from(&path);
-            if p.exists() {
-                paths.push(p);
-            }
-        }
-
-        let legacy_local = PathBuf::from("./echo-agent.yaml");
-        if legacy_local.exists() {
-            paths.push(legacy_local);
-        }
-
-        if let Ok(home) = std::env::var("HOME") {
-            let legacy_global = PathBuf::from(home).join(".echo-agent").join("config.yaml");
-            if legacy_global.exists() {
-                paths.push(legacy_global);
-            }
-        }
-
-        paths
+        vec![root_agent_dir().join("models.yaml")]
     }
 
     /// 从 YAML 配置文件加载
@@ -672,14 +671,18 @@ impl Config {
         for path in paths {
             tracing::debug!("正在加载模型配置文件: {}", path.display());
 
+            if !path.exists() {
+                continue;
+            }
+
             let content = std::fs::read_to_string(&path).map_err(|e| {
                 ConfigError::ConfigFileError(format!("无法读取配置文件 {}: {}", path.display(), e))
             })?;
 
-            if !has_models_section(&content) {
+            if !has_providers_section(&content) {
                 tracing::debug!(
                     path = %path.display(),
-                    "跳过非模型配置文件：缺少顶层 models 段"
+                    "跳过非模型配置文件：缺少顶层 providers 段"
                 );
                 continue;
             }
@@ -710,69 +713,59 @@ impl Config {
         let mut models = HashMap::new();
         let mut invalid_models = HashMap::new();
 
-        for (key, entry) in file.models {
-            let parsed: Result<(String, String, String, LlmProvider)> = (|| {
-                // 解析 base_url：显式指定 > provider 快捷方式
-                let base_url = match (entry.base_url.as_deref(), entry.provider.as_deref()) {
-                    (Some(url), _) => resolve_env_ref(url),
-                    (None, Some(provider)) => {
-                        let resolved_provider = resolve_env_ref(provider);
-                        provider_base_url(&resolved_provider)
-                            .ok_or_else(|| {
-                                ConfigError::ConfigFileError(format!(
-                                    "模型 '{}' 指定了未知的 provider: '{}'，\
-                                     支持的 provider: openai, anthropic, deepseek, dashscope, moonshot, zhipu, ollama",
-                                    key, resolved_provider
-                                ))
-                            })?
-                            .to_string()
-                    }
-                    (None, None) => {
-                        return Err(ConfigError::MissingConfig(
-                            key.clone(),
-                            "base_url 或 provider".to_string(),
-                        )
-                        .into());
-                    }
-                };
+        for (provider_id, entry) in file.providers {
+            let _provider_display_name = entry.name.as_deref();
+            let _auth = entry.auth;
+            let base_url = resolve_env_ref(&entry.base_url);
+            let endpoint = chat_endpoint_for_api(&base_url, entry.api);
+            let provider_kind = llm_provider_for_api(&base_url, entry.api);
+            let api_key = ensure_resolved_api_key(
+                &provider_id,
+                "apiKey",
+                &entry.api_key,
+                &resolve_env_ref(&entry.api_key),
+            );
 
-                let api_key = ensure_resolved_api_key(
-                    &key,
-                    "api_key",
-                    &entry.api_key,
-                    &resolve_env_ref(&entry.api_key),
-                )?;
-                let model_name = entry
-                    .model
-                    .as_deref()
-                    .map(resolve_env_ref)
-                    .unwrap_or_else(|| key.clone());
-
-                // 确定 provider：显式指定 > 从 base_url 推断
-                let provider = match entry.provider.as_deref() {
-                    Some(p) => parse_provider(&resolve_env_ref(p)),
-                    None => detect_provider_from_url(&base_url),
-                };
-                Ok((base_url, api_key, model_name, provider))
-            })();
-
-            match parsed {
-                Ok((base_url, api_key, model_name, provider)) => {
-                    let mc = ModelConfig {
-                        model: model_name.clone(),
-                        baseurl: base_url,
-                        apikey: api_key,
-                        provider,
-                    };
-
-                    models.insert(key.clone(), mc.clone());
-                    if key != model_name {
-                        models.insert(model_name, mc);
-                    }
-                }
+            let api_key = match api_key {
+                Ok(api_key) => api_key,
                 Err(err) => {
-                    tracing::warn!("跳过无效模型配置 {}: {}", key, err);
-                    invalid_models.insert(key.clone(), err.to_string());
+                    let msg = err.to_string();
+                    tracing::warn!("跳过无效 provider 配置 {}: {}", provider_id, msg);
+                    for model in entry.models {
+                        invalid_models.insert(format!("{provider_id}:{}", model.id), msg.clone());
+                        invalid_models.insert(model.id, msg.clone());
+                    }
+                    continue;
+                }
+            };
+
+            for model in entry.models {
+                let _model_metadata = (&model.context_window, &model.max_tokens, &model.input);
+                let id = resolve_env_ref(&model.id);
+                let api_model_name = resolve_env_ref(&model.name);
+                let scoped_id = format!("{provider_id}:{id}");
+                let mc = ModelConfig {
+                    model: api_model_name,
+                    baseurl: endpoint.clone(),
+                    apikey: api_key.clone(),
+                    provider: provider_kind.clone(),
+                };
+
+                models.insert(scoped_id, mc.clone());
+                match models.get(&id) {
+                    None => {
+                        models.insert(id.clone(), mc);
+                    }
+                    Some(existing) if existing.baseurl == mc.baseurl && existing.model == mc.model => {}
+                    Some(_) => {
+                        invalid_models.insert(
+                            id.clone(),
+                            format!(
+                                "模型 ID '{id}' 在多个 provider 中重复，请使用 provider:model 格式调用，例如 '{provider_id}:{id}'"
+                            ),
+                        );
+                        models.remove(&id);
+                    }
                 }
             }
         }
@@ -879,14 +872,18 @@ impl Config {
                         }
                         // Not in YAML either — give a specific error
                         return Err(ConfigError::ConfigFileError(format!(
-                            "模型 '{}' 需要设置环境变量 {}（当前为空）。请在 echo-agent.yaml 中设置 model.auth_token，或在 echo-agent-models.yaml 中配置该模型。",
-                            model, env_vars
+                            "模型 '{}' 需要设置环境变量 {}（当前为空），或在 {} 中配置该模型。",
+                            model,
+                            env_vars,
+                            root_agent_dir().join("models.yaml").display()
                         )).into());
                     }
                     Err(_) => {
                         return Err(ConfigError::ConfigFileError(format!(
-                            "模型 '{}' 需要设置环境变量 {}（当前为空）。请在 echo-agent.yaml 中设置 model.auth_token，或设置 {} 环境变量，或创建 echo-agent-models.yaml 配置文件。",
-                            model, env_vars, env_vars
+                            "模型 '{}' 需要设置环境变量 {}（当前为空），或创建 {} 配置文件。",
+                            model,
+                            env_vars,
+                            root_agent_dir().join("models.yaml").display()
                         )).into());
                     }
                 }
@@ -906,7 +903,10 @@ impl Config {
                     "{}（可用模型: {}）",
                     model,
                     if available.is_empty() {
-                        "无，请创建 echo-agent-models.yaml 并在其中声明 models.*".to_string()
+                        format!(
+                            "无，请创建 {} 并在其中声明 providers.*.models",
+                            root_agent_dir().join("models.yaml").display()
+                        )
                     } else {
                         available.join(", ")
                     }
@@ -952,7 +952,10 @@ impl Config {
         config.embedding.clone().ok_or_else(|| {
             ConfigError::MissingConfig(
                 "embedding".to_string(),
-                "请在 echo-agent-models.yaml 中配置 embedding 段".to_string(),
+                format!(
+                    "请在 {} 中配置 embedding 段",
+                    root_agent_dir().join("models.yaml").display()
+                ),
             )
             .into()
         })
@@ -1043,10 +1046,29 @@ fn builtin_available_models() -> Vec<String> {
     models
 }
 
-fn has_models_section(content: &str) -> bool {
+fn chat_endpoint_for_api(base_url: &str, api: ProviderApiKind) -> String {
+    match api {
+        ProviderApiKind::OpenaiCompletions => {
+            let trimmed = base_url.trim_end_matches('/');
+            if trimmed.ends_with("/chat/completions") {
+                trimmed.to_string()
+            } else {
+                format!("{trimmed}/chat/completions")
+            }
+        }
+    }
+}
+
+fn llm_provider_for_api(base_url: &str, api: ProviderApiKind) -> LlmProvider {
+    match api {
+        ProviderApiKind::OpenaiCompletions => detect_provider_from_url(base_url),
+    }
+}
+
+fn has_providers_section(content: &str) -> bool {
     content.lines().any(|line| {
         let trimmed = line.trim_start();
-        !trimmed.starts_with('#') && line == trimmed && trimmed.starts_with("models:")
+        !trimmed.starts_with('#') && line == trimmed && trimmed.starts_with("providers:")
     })
 }
 
@@ -1328,12 +1350,11 @@ mod tests {
         assert!(format!("{err}").contains("QWEN_API_KEY"));
     }
 
+    #[test]
     fn test_builtin_model_config_uses_qwen_alias() {
         let _lock = env_test_lock();
         unsafe {
             std::env::remove_var("DASHSCOPE_API_KEY");
-            std::env::remove_var("ECHO_AGENT_MODELS_CONFIG");
-            std::env::remove_var("ECHO_AGENT_CONFIG");
         }
         let _guard = EnvGuard::set("QWEN_API_KEY", "qwen-builtin-key");
         let config = Config::get_model("qwen3.6-plus").unwrap();
@@ -1347,8 +1368,6 @@ mod tests {
         let _lock = env_test_lock();
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");
-            std::env::remove_var("ECHO_AGENT_MODELS_CONFIG");
-            std::env::remove_var("ECHO_AGENT_CONFIG");
         }
         let _guard = EnvGuard::set("OPENAI_API_KEY", "openai-builtin-key");
         let config = Config::get_model("openai:gpt-5.5").unwrap();
@@ -1358,56 +1377,71 @@ mod tests {
     }
 
     #[test]
-    fn test_has_models_section_skips_app_config() {
+    fn test_has_providers_section_skips_app_config() {
         let app_yaml = r#"
 model:
   name: qwen3.6-plus
 agent:
   name: echo-assistant
 "#;
-        assert!(!has_models_section(app_yaml));
+        assert!(!has_providers_section(app_yaml));
     }
 
     #[test]
-    fn test_has_models_section_accepts_model_config() {
+    fn test_has_providers_section_accepts_provider_config() {
         let model_yaml = r#"
-models:
-  qwen3.6-plus:
-    provider: qwen
-    api_key: ${DASHSCOPE_API_KEY}
+providers:
+  qwen:
+    name: Qwen
+    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: ${DASHSCOPE_API_KEY}
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: qwen3.6-plus
+        name: qwen3.6-plus
 "#;
-        assert!(has_models_section(model_yaml));
+        assert!(has_providers_section(model_yaml));
     }
 
     #[test]
     fn test_config_from_yaml_string() {
         let yaml = r#"
-models:
-  test-model:
-    base_url: https://api.example.com/v1/chat
-    api_key: sk-test-key
-  alias-model:
-    provider: openai
-    api_key: sk-alias
-    model: gpt-5.5
+providers:
+  custom:
+    name: Custom
+    baseUrl: https://api.example.com/v1
+    apiKey: sk-test-key
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: test-model
+        name: test-model
+      - id: alias-model
+        name: gpt-5.5
 "#;
         let file: ConfigFile = serde_yaml_ng::from_str(yaml).unwrap();
-        assert_eq!(file.models.len(), 2);
-        assert!(file.models.contains_key("test-model"));
-        assert!(file.models.contains_key("alias-model"));
-
-        let entry = &file.models["alias-model"];
-        assert_eq!(entry.provider.as_deref(), Some("openai"));
-        assert_eq!(entry.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(file.providers.len(), 1);
+        let entry = &file.providers["custom"];
+        assert_eq!(entry.base_url, "https://api.example.com/v1");
+        assert_eq!(entry.models.len(), 2);
+        assert_eq!(entry.models[1].id, "alias-model");
+        assert_eq!(entry.models[1].name, "gpt-5.5");
     }
 
     #[test]
     fn test_config_from_yaml_with_embedding() {
         let yaml = r#"
-models:
-  test-model:
-    provider: openai
-    api_key: sk-test
+providers:
+  openai:
+    name: OpenAI
+    baseUrl: https://api.openai.com/v1
+    apiKey: sk-test
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: test-model
+        name: test-model
 embedding:
   base_url: https://api.openai.com
   api_key: ${TEST_EMBED_KEY}
@@ -1486,18 +1520,36 @@ embedding:
     #[test]
     fn test_config_from_yaml_with_provider_detection() {
         let yaml = r#"
-models:
-  claude-test:
-    base_url: https://api.anthropic.com/v1/messages
-    api_key: sk-test
-  ollama-test:
-    base_url: http://localhost:11434/api/chat
-    api_key: ""
-  openai-test:
-    provider: openai
-    api_key: sk-test
+providers:
+  anthropic:
+    name: Anthropic
+    baseUrl: https://api.anthropic.com/v1/messages
+    apiKey: sk-test
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: claude-test
+        name: claude-test
+  ollama:
+    name: Ollama
+    baseUrl: http://localhost:11434/api/chat
+    apiKey: ""
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: ollama-test
+        name: ollama-test
+  openai:
+    name: OpenAI
+    baseUrl: https://api.openai.com/v1
+    apiKey: sk-test
+    api: openai-completions
+    auth: apiKey
+    models:
+      - id: openai-test
+        name: openai-test
 "#;
         let file: ConfigFile = serde_yaml_ng::from_str(yaml).unwrap();
-        assert_eq!(file.models.len(), 3);
+        assert_eq!(file.providers.len(), 3);
     }
 }

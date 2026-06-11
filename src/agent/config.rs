@@ -5,6 +5,7 @@ use crate::agent::react::loop_detector::LoopDetectorConfig;
 use crate::llm::ResponseFormat;
 use crate::tools::ToolExecutionConfig;
 use echo_core::budget::TokenBudgetConfig;
+use echo_core::utils::paths::root_agent_file;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -170,10 +171,10 @@ impl AgentConfig {
             _reasoning_effort: "medium".to_string(),
             tool_execution: ToolExecutionConfig::default(),
             enable_memory: false,
-            memory_path: "~/.echo-agent/store.json".to_string(),
+            memory_path: root_agent_file("store.json").display().to_string(),
             session_id: None,
             conversation_id: None,
-            checkpointer_path: "~/.echo-agent/checkpoints.json".to_string(),
+            checkpointer_path: root_agent_file("checkpoints.json").display().to_string(),
             response_format: None,
             max_tool_output_tokens: None,
             compress_threshold_ratio: 0.2,

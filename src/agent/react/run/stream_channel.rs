@@ -386,13 +386,10 @@ impl AgentSnapshot {
                         cb.on_think_end(&agent, &ts, pt, ct).await;
                     }
                 }
-                context
-                    .lock()
-                    .await
-                    .push(assistant_message_for_history(
-                        Message::assistant_with_tools(msg_tc),
-                        &reasoning_buffer,
-                    ));
+                context.lock().await.push(assistant_message_for_history(
+                    Message::assistant_with_tools(msg_tc),
+                    &reasoning_buffer,
+                ));
 
                 #[cfg(feature = "human-loop")]
                 let (appr, conc) = {
@@ -615,13 +612,10 @@ impl AgentSnapshot {
                     cb.on_think_end(&agent, &ts, pt, ct).await;
                     cb.on_final_answer(&agent, &content_buffer).await;
                 }
-                context
-                    .lock()
-                    .await
-                    .push(assistant_message_for_history(
-                        Message::assistant(content_buffer.clone()),
-                        &reasoning_buffer,
-                    ));
+                context.lock().await.push(assistant_message_for_history(
+                    Message::assistant(content_buffer.clone()),
+                    &reasoning_buffer,
+                ));
                 self.auto_snapshot(&context, iteration).await;
                 if let Some(al) = &self.guard.audit_logger {
                     let ev = crate::audit::AuditEvent::now(
@@ -1202,13 +1196,7 @@ impl AgentSnapshot {
                 call_id: call_id.clone(),
                 name: tool_name.to_string(),
                 success: result.success,
-                output_preview: Some(
-                    result
-                        .output
-                        .chars()
-                        .take(200)
-                        .collect::<String>(),
-                ),
+                output_preview: Some(result.output.chars().take(200).collect::<String>()),
                 output_truncated: false,
                 duration_ms: 0,
             })

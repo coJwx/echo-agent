@@ -1,18 +1,25 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import Sidebar, { type TabKey } from "./components/Sidebar";
+import AccessDeniedView from "./components/AccessDeniedView";
 import ChatView from "./components/chat/ChatView";
 import NewSessionDialog from "./components/chat/NewSessionDialog";
 import ComingSoon from "./components/ComingSoon";
 import ProviderConfigView from "./components/provider/ProviderConfigView";
+import SettingsView from "./components/settings/SettingsView";
 import type { SessionMeta } from "./types";
 
 export default function App() {
+  const isTauri = api.isTauriRuntime();
+  const [authorized, setAuthorized] = useState(
+    () => isTauri || api.hasWebAuthToken(),
+  );
   const [tab, setTab] = useState<TabKey>("chat");
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [showNewSession, setShowNewSession] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const refreshSessions = async () => {
     try {
@@ -21,13 +28,34 @@ export default function App() {
       setSessionError(null);
       setActiveSession((current) => current ?? list[0]?.id ?? null);
     } catch (e) {
+      if (!isTauri && api.isAuthError(e)) {
+        api.clearWebAuthToken();
+        setAuthorized(false);
+        setSessions([]);
+        setActiveSession(null);
+        setSessionError(null);
+        return;
+      }
       setSessionError(e instanceof Error ? e.message : String(e));
     }
   };
 
   useEffect(() => {
-    refreshSessions();
-  }, []);
+    if (authorized) {
+      refreshSessions();
+    }
+  }, [authorized]);
+
+  if (!authorized) {
+    return (
+      <AccessDeniedView
+        onSubmitToken={(token) => {
+          api.setWebAuthToken(token);
+          setAuthorized(true);
+        }}
+      />
+    );
+  }
 
   const handleNewChat = () => {
     setTab("chat");
@@ -45,6 +73,13 @@ export default function App() {
     await refreshSessions();
   };
 
+  const handleSessionUpdated = (meta: SessionMeta) => {
+    setSessions((current) =>
+      current.map((session) => (session.id === meta.id ? meta : session)),
+    );
+    setActiveSession(meta.id);
+  };
+
   const handleCreatedSession = async (meta: SessionMeta) => {
     setShowNewSession(false);
     await refreshSessions();
@@ -58,6 +93,7 @@ export default function App() {
     <div className="flex h-full w-full bg-bg-base">
       <Sidebar
         active={tab}
+        collapsed={sidebarCollapsed}
         sessions={sessions}
         activeSession={activeSession}
         sessionError={sessionError}
@@ -68,7 +104,15 @@ export default function App() {
       />
       <main className="flex-1 min-w-0 flex flex-col">
         {tab === "chat" && (
-          <ChatView active={activeSession} current={currentSession} />
+          <ChatView
+            active={activeSession}
+            current={currentSession}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() =>
+              setSidebarCollapsed((collapsed) => !collapsed)
+            }
+            onSessionUpdated={handleSessionUpdated}
+          />
         )}
         {tab === "mcp" && (
           <ComingSoon
@@ -85,6 +129,7 @@ export default function App() {
           />
         )}
         {tab === "provider" && <ProviderConfigView />}
+        {tab === "settings" && <SettingsView isTauri={isTauri} />}
       </main>
       {showNewSession && (
         <NewSessionDialog

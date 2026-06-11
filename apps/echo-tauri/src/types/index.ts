@@ -20,6 +20,7 @@ export interface CreateSessionInput {
 export interface ProviderModel {
   name: string;
   provider?: string | null;
+  provider_name?: string | null;
   base_url?: string | null;
   api_key: string;
   model?: string | null;
@@ -27,6 +28,7 @@ export interface ProviderModel {
 
 export interface ProviderGroup {
   name: string;
+  display_name: string;
   models: ProviderModel[];
 }
 
@@ -43,6 +45,10 @@ export interface ProviderModelInput {
   base_url?: string | null;
   api_key: string;
   model?: string | null;
+}
+
+export interface UpdateSessionModelInput {
+  model: string;
 }
 
 // snake_case 与 Rust #[serde(rename_all = "snake_case")] 对齐
@@ -130,6 +136,15 @@ export interface ToolCallTrace {
   result?: string;
   error?: string;
   startedAt?: number;
+}
+
+export interface AccessTokenInfo {
+  token: string;
+  created_at_ms: number;
+  expires_at_ms: number;
+  local_url: string;
+  network_url?: string | null;
+  qr_svg: string;
 }
 
 export interface DebugChatTrace {

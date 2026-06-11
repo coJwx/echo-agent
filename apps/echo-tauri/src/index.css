@@ -50,7 +50,7 @@
   }
 
   .readable-prose {
-    @apply text-[15px] leading-[1.58] text-ink-primary;
+    @apply text-[15px] leading-[1.5] text-ink-primary;
   }
 
   .readable-prose :where(p, ul, ol, pre) {

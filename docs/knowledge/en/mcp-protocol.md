@@ -199,7 +199,7 @@ agent.add_tools(tools);
 ### YAML Configuration
 
 ```yaml
-# echo-agent.yaml
+# ROOT_AGENT_DIR/config.yaml
 mcp:
   servers:
     filesystem:
@@ -223,7 +223,7 @@ mcp:
 
 ```rust
 // Load configuration at runtime
-let config = McpConfigLoader::from_yaml("echo-agent.yaml")?;
+let config = McpConfigLoader::from_yaml("ROOT_AGENT_DIR/config.yaml")?;
 
 for server in config.mcp.servers {
     let tools = mcp.connect(server).await?;

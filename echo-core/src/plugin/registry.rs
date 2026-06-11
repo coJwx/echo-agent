@@ -6,6 +6,7 @@
 
 use crate::plugin::manifest::PluginManifest;
 use crate::plugin::scope::{InstallSource, PluginScope};
+use crate::utils::paths::root_agent_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -76,11 +77,7 @@ pub struct PluginRegistry {
 impl PluginRegistry {
     /// Create a new registry with the default state file location.
     pub fn new(project_root: Option<PathBuf>) -> Self {
-        let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("~"));
-
-        let base = home.join(".echo-agent");
+        let base = root_agent_dir();
         let state_file = base.join("plugins").join("registry.json");
         let data_dir = base.join("plugins").join("data");
 

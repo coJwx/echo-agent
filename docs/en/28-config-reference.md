@@ -5,7 +5,7 @@
 echo-agent provides two configuration approaches:
 
 1. **Rust API** — `AgentConfig` + `ReactAgentBuilder` for programmatic configuration
-2. **YAML file** — `echo-agent.yaml` for declarative configuration
+2. **YAML file** — `ROOT_AGENT_DIR/config.yaml` for declarative configuration
 
 ---
 
@@ -348,14 +348,13 @@ pub enum SnapshotPolicy {
 
 ## YAML Configuration
 
-echo-agent supports declarative configuration via `echo-agent.yaml`.
+echo-agent supports declarative configuration via `ROOT_AGENT_DIR/config.yaml`.
 
-### File Search Order
+### File Location
 
-1. `$ECHO_AGENT_CONFIG` environment variable
-2. `./echo-agent.yaml` (current directory)
-3. `~/.echo-agent/config.yaml` (user home)
-4. Built-in defaults
+1. `$ROOT_AGENT_DIR/config.yaml`
+2. `~/.echo-agent/config.yaml` when `ROOT_AGENT_DIR` is unset
+3. Built-in defaults when the file does not exist
 
 ### Full Example
 
@@ -414,7 +413,7 @@ logging:
 
 | Env Var | Effect |
 |---------|--------|
-| `ECHO_AGENT_CONFIG` | Explicit config file path |
+| `ROOT_AGENT_DIR` | Echo Agent config directory; config is read from `config.yaml` inside it |
 | `QQ_APP_ID` | Sets QQ channel app_id, auto-enables QQ |
 | `QQ_CLIENT_SECRET` | Sets QQ channel client_secret |
 | `FEISHU_APP_ID` | Sets Feishu channel app_id, auto-enables Feishu |
@@ -524,7 +523,7 @@ let agent = ReactAgentBuilder::full_featured("qwen3-max", "assistant", "You are 
 ### YAML-Based Configuration
 
 ```rust
-let config = AppConfig::load()?;  // loads echo-agent.yaml
+let config = AppConfig::load()?;  // loads ROOT_AGENT_DIR/config.yaml
 ```
 
 ---

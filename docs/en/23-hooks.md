@@ -12,7 +12,7 @@ Hooks allow custom behavior to be injected at key points in the agent lifecycle.
 
 ## Skills Hooks
 
-The primary hook system. Hooks are configured in YAML (via `echo-agent.yaml` or SKILL.md frontmatter) and executed by the `HookExecutor`.
+The primary hook system. Hooks are configured in YAML (via `ROOT_AGENT_DIR/config.yaml` or SKILL.md frontmatter) and executed by the `HookExecutor`.
 
 ### Hook Events
 
@@ -242,4 +242,4 @@ let agent = ReactAgentBuilder::new()
     .build()?;
 ```
 
-Skills hooks are configured via YAML and loaded automatically from `echo-agent.yaml` or SKILL.md files.
+Skills hooks are configured via YAML and loaded automatically from `ROOT_AGENT_DIR/config.yaml` or SKILL.md files.

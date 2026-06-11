@@ -5,10 +5,14 @@ import {
   CheckCircle2,
   CircleOff,
   Cloud,
+  Eye,
+  EyeOff,
   Moon,
+  Pencil,
   Plus,
   Server,
   Sparkles,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { api } from "../../api";
@@ -72,13 +76,13 @@ const defaultApiKeyByProvider: Record<string, string> = {
 const defaultProviderKeys = [
   "openai",
   "anthropic",
-  "google",
-  "azure_openai",
-  "dashscope",
+  "gemini",
   "zhipu",
   "deepseek",
-  "ollama",
-  "custom",
+  "moonshot",
+  "dashscope",
+  // "azure_openai",
+  // "ollama"
 ];
 
 const emptyForm: ProviderModelInput = {
@@ -101,6 +105,8 @@ export default function ProviderConfigView() {
   const [form, setForm] = useState<ProviderModelInput>(emptyForm);
   const [selectedProvider, setSelectedProvider] = useState("openai");
   const [selectedModelName, setSelectedModelName] = useState("");
+  const [providerEnabled, setProviderEnabled] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,9 +138,13 @@ export default function ProviderConfigView() {
     () => (config ? buildProviderRows(config) : []),
     [config],
   );
+  const currentProviderLabel =
+    providerRows.find((provider) => provider.key === selectedProvider)?.label ??
+    providerLabel(selectedProvider);
   const currentModels =
     providerRows.find((provider) => provider.key === selectedProvider)?.models ??
     [];
+  const addingModel = selectedModelName === "";
   const existingNames = useMemo(
     () => new Set(config?.models.map((model) => model.name) ?? []),
     [config],
@@ -147,6 +157,7 @@ export default function ProviderConfigView() {
     const models =
       buildProviderRows(source).find((row) => row.key === provider)?.models ?? [];
     const firstModel = models[0];
+    setProviderEnabled(models.length > 0);
     if (firstModel) {
       setSelectedModelName(firstModel.name);
       setForm(modelToForm(firstModel, provider));
@@ -167,6 +178,7 @@ export default function ProviderConfigView() {
     setSelectedModelName("");
     setMessage(null);
     setError(null);
+    setProviderEnabled(false);
     setForm(blankFormForProvider("custom"));
   }
 
@@ -203,260 +215,233 @@ export default function ProviderConfigView() {
     }
   }
 
-  function updateProvider(provider: string) {
-    setSelectedProvider(provider);
-    setSelectedModelName("");
-    setForm(blankFormForProvider(provider));
-  }
-
   return (
-    <div className="flex-1 min-h-0 overflow-hidden bg-[radial-gradient(circle_at_20%_0%,rgba(72,88,255,0.14),transparent_32%),#0d1118]">
-      <div className="flex h-full flex-col p-4">
-        <header className="mb-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold text-ink-primary">
-              Provider 配置
+    <div className="flex-1 min-h-0 overflow-hidden bg-bg-base">
+      <div className="grid h-full min-h-0 grid-cols-[360px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 flex-col border-r border-[#2a2a2a] bg-[#171717]">
+          <div className="px-4 pb-3 pt-5">
+            <h1 className="text-[18px] font-semibold text-ink-primary">
+              模型提供商
             </h1>
-            <p className="mt-0.5 text-[12px] text-ink-secondary">
-              {config?.path ?? "正在读取 echo-agent-models.yaml..."}
-            </p>
           </div>
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-[14px] font-medium text-white shadow-lg shadow-brand/25 transition hover:bg-brand-hover"
-            onClick={startAddProvider}
-          >
-            <Plus className="h-4 w-4" strokeWidth={2} />
-            <span>添加服务商</span>
-          </button>
-        </header>
 
-        {(error || message) && (
-          <div
-            className={
-              "mb-3 rounded-lg border px-3 py-2 text-[13px] " +
-              (error
-                ? "border-red-500/40 bg-red-500/10 text-red-200"
-                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200")
-            }
-          >
-            {error ?? message}
-          </div>
-        )}
-
-        <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_390px] overflow-hidden rounded-xl border border-border-strong bg-bg-panel/80 shadow-2xl shadow-black/25 backdrop-blur">
-          <section className="min-w-0 overflow-auto p-3">
-            <div className="mb-3 flex items-center justify-between">
-              <div>
-                <h2 className="text-[15px] font-semibold text-ink-primary">
-                  API 服务商配置
-                </h2>
-                <p className="mt-0.5 text-[12px] text-ink-secondary">
-                  {providerRows.filter((item) => item.connected).length} 个已连接，{config?.models.length ?? 0} 个模型
-                </p>
-              </div>
-              <span className="rounded-full border border-border-subtle bg-bg-card px-2.5 py-1 text-[12px] text-ink-secondary">
-                {loading ? "加载中" : `${providerRows.length} providers`}
-              </span>
-            </div>
-
+          <div className="min-h-0 flex-1 space-y-2 overflow-auto px-3 pb-4">
             {loading ? (
               <div className="rounded-lg border border-border-subtle bg-bg-card/70 p-4 text-[14px] text-ink-secondary">
                 正在加载 Provider 配置...
               </div>
             ) : (
-              <div className="space-y-2">
-                {providerRows.map((provider) => (
-                  <button
-                    key={provider.key}
-                    className={
-                      "group w-full rounded-lg border p-3 text-left transition " +
-                      (selectedProvider === provider.key
-                        ? "border-brand bg-brand-soft shadow-[0_0_0_1px_rgba(108,92,231,0.25)_inset]"
-                        : "border-border-subtle bg-bg-card/70 hover:border-border-strong hover:bg-bg-hover/70")
-                    }
-                    onClick={() => selectProvider(provider.key)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <ProviderIcon provider={provider.key} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate font-medium text-ink-primary">
-                            {provider.label}
-                          </span>
-                          {provider.connected && provider.key === "openai" && (
-                            <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
-                              默认
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {provider.models.length > 0 ? (
-                            provider.models.map((model) => (
-                              <span
-                                key={model.name}
-                                className="rounded bg-white/5 px-2 py-1 text-[12px] text-ink-secondary"
-                              >
-                                {model.name}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-[12px] text-ink-secondary">
-                              暂未配置 model
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <ConnectionStatus connected={provider.connected} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <aside className="flex min-h-0 flex-col border-l border-border-strong bg-[#111620]/90">
-            <div className="border-b border-border-subtle px-4 py-3">
-              <h2 className="text-[15px] font-semibold text-ink-primary">
-                编辑服务商
-              </h2>
-              <p className="mt-0.5 text-[12px] text-ink-secondary">
-                {providerLabel(selectedProvider)} · {currentModels.length || 0} models
-              </p>
-            </div>
-
-            <form
-              className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-4 py-3"
-              onSubmit={handleSubmit}
-            >
-              <Field label="服务商名称">
-                <select
-                  className="input-base h-10 w-full"
-                  value={form.provider ?? "custom"}
-                  onChange={(event) => updateProvider(event.target.value)}
+              providerRows.map((provider) => (
+                <button
+                  key={provider.key}
+                  className={
+                    "group flex min-h-[58px] w-full items-center gap-3 rounded-md border px-3 text-left transition " +
+                    (selectedProvider === provider.key
+                      ? "border-brand bg-brand-soft"
+                      : "border-transparent bg-transparent hover:bg-bg-hover")
+                  }
+                  onClick={() => selectProvider(provider.key)}
                 >
-                  {(config?.supported_providers.length
-                    ? config.supported_providers
-                    : defaultProviderKeys
-                  ).map((provider) => (
-                    <option key={provider} value={provider}>
-                      {providerLabel(provider)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              {currentModels.length > 0 && (
-                <Field label="已配置 Model">
-                  <select
-                    className="input-base h-10 w-full"
-                    value={selectedModelName}
-                    onChange={(event) => selectModel(event.target.value)}
-                  >
-                    {currentModels.map((model) => (
-                      <option key={model.name} value={model.name}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
-
-              <Field label="Model Key">
-                <input
-                  className="input-base h-10 w-full"
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="gpt-4o"
-                  required
-                />
-              </Field>
-
-              <Field label="API 地址">
-                <input
-                  className="input-base h-10 w-full"
-                  value={form.base_url ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      base_url: event.target.value,
-                    }))
-                  }
-                  placeholder="留空时使用服务商默认地址"
-                />
-              </Field>
-
-              <Field label="API Key">
-                <div className="relative">
-                  <input
-                    className="input-base h-10 w-full pr-10 font-mono"
-                    value={form.api_key}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        api_key: event.target.value,
-                      }))
-                    }
-                    placeholder="${OPENAI_API_KEY}"
-                    required
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-muted">
-                    {form.api_key.startsWith("${") ? "ENV" : "•••"}
+                  <ProviderIcon provider={provider.key} />
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-ink-primary">
+                    {provider.label}
                   </span>
-                </div>
-              </Field>
+                  <ConnectionStatus connected={provider.connected} />
+                </button>
+              ))
+            )}
+          </div>
+        </aside>
 
-              <Field label="实际模型名">
-                <input
-                  className="input-base h-10 w-full"
-                  value={form.model ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      model: event.target.value,
-                    }))
-                  }
-                  placeholder="默认使用 Model Key"
-                />
-              </Field>
+        <main className="flex min-h-0 flex-col overflow-auto px-10 py-8">
+          <header className="mb-10 flex items-start justify-between gap-4">
+            <h2 className="text-[26px] font-semibold text-ink-primary">
+              模型配置
+            </h2>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-[14px] font-medium text-white shadow-lg shadow-brand/20 transition hover:bg-brand-hover"
+              onClick={startAddProvider}
+            >
+              <Plus className="h-4 w-4" strokeWidth={2} />
+              <span>新增供应商</span>
+            </button>
+          </header>
 
-              <Field label="超时时间（秒）">
-                <input
-                  className="input-base h-10 w-full"
-                  value="60"
-                  readOnly
-                />
-              </Field>
+          {(error || message) && (
+            <div
+              className={
+                "mb-4 max-w-[1180px] rounded-md border px-3 py-2 text-[13px] " +
+                (error
+                  ? "border-red-500/40 bg-red-500/10 text-red-200"
+                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200")
+              }
+            >
+              {error ?? message}
+            </div>
+          )}
 
-              <div className="mt-1 flex items-center justify-between">
-                <span className="text-[13px] text-ink-secondary">启用状态</span>
-                <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-brand">
-                  <span className="absolute right-0.5 h-4 w-4 rounded-full bg-white shadow" />
-                </span>
-              </div>
-
-              <div className="mt-auto flex gap-3 pt-4">
+          <form
+            className="flex w-full max-w-[1180px] flex-col rounded-xl border border-border-subtle bg-bg-panel p-6 shadow-2xl shadow-black/20"
+            onSubmit={handleSubmit}
+          >
+            <div className="mb-8 flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <h3 className="truncate text-[24px] font-semibold text-ink-primary">
+                  {currentProviderLabel}
+                </h3>
                 <button
                   type="button"
-                  className="flex-1 rounded-lg bg-bg-hover px-3 py-2 text-[14px] text-ink-secondary transition hover:text-ink-primary"
-                  onClick={startAddModel}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-secondary transition hover:bg-white/5 hover:text-ink-primary"
+                  aria-label="编辑服务商名称"
                 >
-                  新增模型
-                </button>
-                <button
-                  className="flex-1 rounded-lg bg-brand px-3 py-2 text-[14px] font-medium text-white shadow-lg shadow-brand/20 transition hover:bg-brand-hover disabled:opacity-60"
-                  disabled={saving}
-                >
-                  {saving ? "保存中..." : "保存"}
+                  <Pencil className="h-4 w-4" strokeWidth={2} />
                 </button>
               </div>
-            </form>
-          </aside>
+              <button
+                type="button"
+                className={
+                  "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition " +
+                  (providerEnabled ? "bg-brand" : "bg-bg-hover")
+                }
+                onClick={() => setProviderEnabled((enabled) => !enabled)}
+                aria-pressed={providerEnabled}
+                aria-label={providerEnabled ? "停用服务商" : "启用服务商"}
+              >
+                <span
+                  className={
+                    "h-5 w-5 rounded-full bg-white shadow transition " +
+                    (providerEnabled ? "translate-x-5" : "translate-x-0.5")
+                  }
+                />
+              </button>
+            </div>
+
+            <Field label="API Base URL">
+              <input
+                className="input-base h-11 w-full"
+                value={form.base_url ?? ""}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    base_url: event.target.value,
+                  }))
+                }
+                placeholder="留空时使用服务商默认地址"
+              />
+            </Field>
+
+            <Field label="API Key">
+              <div className="relative">
+                <input
+                  className="input-base h-11 w-full pr-12 font-mono"
+                  type={showApiKey ? "text" : "password"}
+                  value={form.api_key}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      api_key: event.target.value,
+                    }))
+                  }
+                  placeholder="${OPENAI_API_KEY}"
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary transition hover:bg-white/5 hover:text-ink-primary"
+                  onClick={() => setShowApiKey((current) => !current)}
+                  aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
+                >
+                  {showApiKey ? (
+                    <EyeOff className="h-4 w-4" strokeWidth={2} />
+                  ) : (
+                    <Eye className="h-4 w-4" strokeWidth={2} />
+                  )}
+                </button>
+              </div>
+            </Field>
+
+            <div className="mt-5">
+              <span className="mb-3 block text-[14px] font-medium text-ink-secondary">
+                模型选择
+              </span>
+              <div className="max-h-[300px] overflow-auto rounded-md border border-border-subtle bg-bg-card p-2">
+                {currentModels.length > 0 ? (
+                  currentModels.map((model) => (
+                    <button
+                      key={model.name}
+                      type="button"
+                      className={
+                        "flex h-[58px] w-full items-center gap-3 rounded px-3 text-left transition " +
+                        (selectedModelName === model.name
+                          ? "bg-brand-soft"
+                          : "hover:bg-bg-hover")
+                      }
+                      onClick={() => selectModel(model.name)}
+                    >
+                      <span
+                        className={
+                          "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border " +
+                          (selectedModelName === model.name
+                            ? "border-brand"
+                            : "border-ink-secondary")
+                        }
+                      >
+                        {selectedModelName === model.name && (
+                          <span className="h-2 w-2 rounded-full bg-brand" />
+                        )}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-ink-primary">
+                        {model.name}
+                      </span>
+                      <span
+                        className="flex h-8 w-8 shrink-0 items-center justify-center text-ink-secondary"
+                        aria-hidden="true"
+                      >
+                        <Trash2 className="h-4 w-4" strokeWidth={2} />
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-3 py-8 text-[14px] text-ink-secondary">
+                    暂未配置 model
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-3 flex gap-3">
+              <input
+                className="input-base h-11 min-w-0 flex-1"
+                value={selectedModelName ? "" : form.name}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    name: event.target.value,
+                    model: event.target.value,
+                  }))
+                }
+                onFocus={startAddModel}
+                placeholder="输入模型名称，如 Qwen/Qwen3.5-397B-A17B"
+              />
+              <button
+                className="flex h-11 w-14 shrink-0 items-center justify-center rounded-md bg-brand text-white transition hover:bg-brand-hover disabled:opacity-60"
+                disabled={saving || !addingModel || !form.name.trim()}
+                aria-label={saving ? "保存中" : "新增模型"}
+              >
+                <Plus className="h-5 w-5" strokeWidth={2} />
+              </button>
+            </div>
+
+            <div className="mt-6 border-t border-border-subtle pt-5">
+              <button
+                className="rounded-md bg-brand px-5 py-2 text-[14px] font-medium text-white shadow-lg shadow-brand/20 transition hover:bg-brand-hover disabled:opacity-60"
+                disabled={saving || !form.name.trim()}
+              >
+                {saving ? "保存中..." : "保存配置"}
+              </button>
+            </div>
+          </form>
         </main>
       </div>
     </div>
@@ -465,9 +450,11 @@ export default function ProviderConfigView() {
 
 function buildProviderRows(config: ProviderConfig | null): ProviderRow[] {
   const providerMap = new Map<string, ProviderModel[]>();
+  const displayNameMap = new Map<string, string>();
   if (config) {
     for (const group of config.providers) {
       providerMap.set(group.name, group.models);
+      displayNameMap.set(group.name, group.display_name || group.name);
     }
   }
 
@@ -483,11 +470,11 @@ function buildProviderRows(config: ProviderConfig | null): ProviderRow[] {
   return Array.from(keys)
     .map((key) => ({
       key,
-      label: providerLabel(key),
+      label: displayNameMap.get(key) ?? providerLabel(key),
       models: providerMap.get(key) ?? [],
       connected: (providerMap.get(key)?.length ?? 0) > 0,
     }))
-    .sort((a, b) => Number(b.connected) - Number(a.connected) || a.label.localeCompare(b.label));
+    .sort((a, b) => Number(b.connected) - Number(a.connected));
 }
 
 function blankFormForProvider(provider: string): ProviderModelInput {

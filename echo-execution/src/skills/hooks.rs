@@ -56,7 +56,7 @@
 //! | `http` | POST event data to a URL, parse response |
 //! | `mcp_tool` | Call an MCP server tool |
 //!
-//! ## YAML format (SKILL.md frontmatter or echo-agent.yaml)
+//! ## YAML format (SKILL.md frontmatter or ROOT_AGENT_DIR/config.yaml)
 //!
 //! ```yaml
 //! hooks:

@@ -5,6 +5,7 @@
 //! trajectory saving approach.
 
 use chrono::{DateTime, Utc};
+use echo_core::utils::paths::root_agent_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -77,10 +78,7 @@ impl TrajectorySaver {
 
     /// Create a saver with the default path (`~/.echo-agent/trajectories/`).
     pub fn default_dir() -> Result<Self> {
-        let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."));
-        let dir = home.join(".echo-agent").join("trajectories");
+        let dir = root_agent_dir().join("trajectories");
         Self::new(dir)
     }
 

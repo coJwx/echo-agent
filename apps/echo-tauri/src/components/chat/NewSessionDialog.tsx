@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../api";
 import type { SessionMeta } from "../../types";
 
@@ -21,8 +21,30 @@ export default function NewSessionDialog({ onCancel, onCreated }: Props) {
   const [title, setTitle] = useState("新对话");
   const [model, setModel] = useState("glm-5.1");
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPT);
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getProviderConfig()
+      .then((config) => {
+        if (!cancelled) {
+          const models = config.models.map((item) => item.name);
+          setModelOptions(models);
+          if (models.length > 0 && !models.includes(model)) {
+            setModel(models[0]);
+          }
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const create = async () => {
     setBusy(true);
@@ -64,15 +86,26 @@ export default function NewSessionDialog({ onCancel, onCreated }: Props) {
           />
         </Field>
 
-        <Field
-          label="模型"
-          hint="必须在 echo-agent-models.yaml 中存在；默认 glm-5.1"
-        >
-          <input
-            className="input-base w-full font-mono"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          />
+        <Field label="模型" hint="来自 Provider 配置">
+          {modelOptions.length > 0 ? (
+            <select
+              className="input-base w-full font-mono"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            >
+              {modelOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="input-base w-full font-mono"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            />
+          )}
         </Field>
 
         <Field label="System Prompt">

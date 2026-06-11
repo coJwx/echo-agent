@@ -372,7 +372,7 @@ async fn demo_multimodal_support() -> Result<()> {
     let preview: String = response.chars().take(100).collect();
     println!("    回复: {}...\n", preview);
 
-    println!("  注意: 实际图片分析需要在 echo-agent.yaml 中把 model.name 设为视觉模型");
+    println!("  注意: 实际图片分析需要在 ROOT_AGENT_DIR/config.yaml 中把 model.name 设为视觉模型");
     println!("    例如 `qwen3.7-plus` 或 `gpt-5.5`，并确保它已在 models 中声明\n");
 
     Ok(())
@@ -435,7 +435,7 @@ fn require_configured_model(preferred: Option<&str>) -> echo_agent::error::Resul
         .err()
         .map(|e| format!("配置加载失败：{e}"))
         .unwrap_or_else(|| {
-            "请在 echo-agent.yaml 的 `models:` 中声明至少一个模型，并让 `model.name` 指向它。"
+            "请在 ROOT_AGENT_DIR/models.yaml 的 `providers.*.models` 中声明至少一个模型，并让 `model.name` 指向它。"
                 .to_string()
         });
     Err(echo_agent::error::ReactError::Other(format!(

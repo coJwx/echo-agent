@@ -4,6 +4,7 @@
 //! writes to project-level and global-level directories simultaneously.
 
 use crate::improve::RunCritique;
+use echo_core::utils::paths::root_agent_dir;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -205,10 +206,7 @@ impl DualLayerCritiqueStore {
             .join("evolution")
             .join("critiques");
 
-        let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("~"));
-        let global_dir = home.join(".echo-agent").join("evolution").join("critiques");
+        let global_dir = root_agent_dir().join("evolution").join("critiques");
 
         Self::new(project_dir, global_dir)
     }

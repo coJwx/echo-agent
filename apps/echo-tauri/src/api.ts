@@ -1,4 +1,5 @@
 import type {
+  AccessTokenInfo,
   CreateSessionInput,
   DebugChatTrace,
   HistoryMessage,
@@ -6,14 +7,26 @@ import type {
   ProviderModelInput,
   SessionMeta,
   StreamPayload,
+  UpdateSessionModelInput,
 } from "./types";
 
 type UnlistenFn = () => void;
+
+class ApiAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiAuthError";
+  }
+}
 
 interface ApiTransport {
   createSession(input: CreateSessionInput): Promise<SessionMeta>;
   listSessions(): Promise<SessionMeta[]>;
   deleteSession(sessionId: string): Promise<void>;
+  updateSessionModel(
+    sessionId: string,
+    input: UpdateSessionModelInput,
+  ): Promise<SessionMeta>;
   getProviderConfig(): Promise<ProviderConfig>;
   saveProviderModel(input: ProviderModelInput): Promise<ProviderConfig>;
   history(sessionId: string): Promise<HistoryMessage[]>;
@@ -23,6 +36,8 @@ interface ApiTransport {
     sessionId: string,
     onEvent: (payload: StreamPayload) => void,
   ): Promise<UnlistenFn>;
+  getAccessTokenInfo(): Promise<AccessTokenInfo>;
+  refreshAccessToken(): Promise<AccessTokenInfo>;
 }
 
 let transportPromise: Promise<ApiTransport> | null = null;
@@ -38,6 +53,13 @@ export const api = {
 
   async deleteSession(sessionId: string): Promise<void> {
     return (await getTransport()).deleteSession(sessionId);
+  },
+
+  async updateSessionModel(
+    sessionId: string,
+    input: UpdateSessionModelInput,
+  ): Promise<SessionMeta> {
+    return (await getTransport()).updateSessionModel(sessionId, input);
   },
 
   async getProviderConfig(): Promise<ProviderConfig> {
@@ -72,6 +94,37 @@ export const api = {
     onEvent: (payload: StreamPayload) => void,
   ): Promise<UnlistenFn> {
     return (await getTransport()).listenSession(sessionId, onEvent);
+  },
+
+  isTauriRuntime,
+
+  hasWebAuthToken(): boolean {
+    return Boolean(readWebAuthToken());
+  },
+
+  setWebAuthToken(token: string): void {
+    writeWebAuthToken(token);
+    transportPromise = null;
+  },
+
+  clearWebAuthToken(): void {
+    clearWebAuthToken();
+    transportPromise = null;
+  },
+
+  isAuthError(error: unknown): boolean {
+    return error instanceof ApiAuthError;
+  },
+
+  async getAccessTokenInfo(): Promise<AccessTokenInfo> {
+    return (await getTransport()).getAccessTokenInfo();
+  },
+
+  async refreshAccessToken(): Promise<AccessTokenInfo> {
+    const info = await (await getTransport()).refreshAccessToken();
+    writeWebAuthToken(info.token);
+    transportPromise = null;
+    return info;
   },
 };
 
@@ -109,6 +162,9 @@ async function createTauriTransport(): Promise<ApiTransport> {
     deleteSession(sessionId) {
       return invoke<void>("agent_delete_session", { sessionId });
     },
+    updateSessionModel(sessionId, input) {
+      return invoke<SessionMeta>("agent_update_model", { sessionId, input });
+    },
     getProviderConfig() {
       return invoke<ProviderConfig>("provider_config_get");
     },
@@ -130,6 +186,12 @@ async function createTauriTransport(): Promise<ApiTransport> {
     listenSession(sessionId, onEvent) {
       const channel = `echo://agent/stream/${sessionId}`;
       return listen<StreamPayload>(channel, (e) => onEvent(e.payload));
+    },
+    async getAccessTokenInfo() {
+      throw new Error("Access token settings are only available in web mode");
+    },
+    async refreshAccessToken() {
+      throw new Error("Access token settings are only available in web mode");
     },
   };
 }
@@ -156,6 +218,17 @@ function createWebTransport(): ApiTransport {
         `/api/sessions/${encodeURIComponent(sessionId)}`,
         {
           method: "DELETE",
+        },
+      );
+    },
+    updateSessionModel(sessionId, input) {
+      return request<SessionMeta>(
+        baseUrl,
+        token,
+        `/api/sessions/${encodeURIComponent(sessionId)}/model`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
         },
       );
     },
@@ -194,6 +267,14 @@ function createWebTransport(): ApiTransport {
           sockets.delete(sessionId);
         }
       };
+    },
+    getAccessTokenInfo() {
+      return request<AccessTokenInfo>(baseUrl, token, "/api/access-token");
+    },
+    refreshAccessToken() {
+      return request<AccessTokenInfo>(baseUrl, token, "/api/access-token/refresh", {
+        method: "POST",
+      });
     },
   };
 }
@@ -259,12 +340,18 @@ async function request<T>(
   });
 
   if (!response.ok) {
-    let message = response.statusText;
-    try {
-      const body = (await response.json()) as { error?: string };
-      message = body.error || message;
-    } catch {
-      message = (await response.text()) || message;
+    const text = await response.text();
+    let message = text || response.statusText;
+    if (text) {
+      try {
+        const body = JSON.parse(text) as { error?: string };
+        message = body.error || message;
+      } catch {
+        // Keep the plain-text body.
+      }
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new ApiAuthError(message || "Unauthorized");
     }
     throw new Error(message);
   }
@@ -283,21 +370,35 @@ function webHttpBaseUrl(): string {
 function webAuthToken(): string {
   const fromUrl = new URLSearchParams(window.location.search).get("token");
   if (fromUrl) {
-    document.cookie = `echo_http_token=${encodeURIComponent(fromUrl)}; path=/; SameSite=Lax`;
+    writeWebAuthToken(fromUrl);
     const url = new URL(window.location.href);
     url.searchParams.delete("token");
     window.history.replaceState({}, "", url);
     return fromUrl;
   }
 
+  const fromCookie = readWebAuthToken();
+  if (fromCookie) return fromCookie;
+  throw new Error("Missing access token. Open the URL printed by echo-http-server.");
+}
+
+function readWebAuthToken(): string | null {
+  if (typeof document === "undefined") return null;
   const fromCookie = document.cookie
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith("echo_http_token="))
     ?.split("=")[1];
 
-  if (fromCookie) return decodeURIComponent(fromCookie);
-  throw new Error("Missing access token. Open the URL printed by echo-http-server.");
+  return fromCookie ? decodeURIComponent(fromCookie) : null;
+}
+
+function writeWebAuthToken(token: string) {
+  document.cookie = `echo_http_token=${encodeURIComponent(token)}; path=/; SameSite=Lax`;
+}
+
+function clearWebAuthToken() {
+  document.cookie = "echo_http_token=; path=/; max-age=0; SameSite=Lax";
 }
 
 function webSocketUrl(baseUrl: string, token: string, sessionId: string): string {

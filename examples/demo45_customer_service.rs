@@ -25,7 +25,7 @@
 //! # 带流式输出和彩色日志
 //! RUST_LOG=info QWEN_API_KEY=your_key cargo run --example demo45_customer_service --features sqlite
 //!
-//! # 若要验证图片输入，请先在 echo-agent.yaml 中把 model.name 设为视觉模型
+//! # 若要验证图片输入，请先在 ROOT_AGENT_DIR/config.yaml 中把 model.name 设为视觉模型
 //! cargo run --example demo45_customer_service --features sqlite
 //! ```
 

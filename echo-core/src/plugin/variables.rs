@@ -11,6 +11,7 @@
 //!
 //! Environment variables from the OS (`${ENV_VAR}`) are also substituted.
 
+use crate::utils::paths::root_agent_dir;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -64,11 +65,7 @@ impl PluginVariables {
             })
             .collect::<String>();
 
-        let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("~"));
-
-        home.join(".echo-agent")
+        root_agent_dir()
             .join("plugins")
             .join("data")
             .join(sanitized)

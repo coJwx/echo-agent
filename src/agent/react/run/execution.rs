@@ -27,10 +27,7 @@ pub(crate) struct ToolExecutionFailure {
     pub hook_messages: HookMessageBatches,
 }
 
-pub(crate) fn tool_observation_text(
-    tool_name: &str,
-    result: &crate::tools::ToolResult,
-) -> String {
+pub(crate) fn tool_observation_text(tool_name: &str, result: &crate::tools::ToolResult) -> String {
     if result.success {
         if result.output.is_empty() {
             format!("[Tool {tool_name} completed successfully with empty output]")

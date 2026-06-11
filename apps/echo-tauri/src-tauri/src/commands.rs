@@ -7,7 +7,9 @@ use tauri::{AppHandle, Emitter, State};
 use echo_app_core::chat::{self, DebugChatTrace};
 use echo_app_core::error::AppResult;
 use echo_app_core::events::channel_name;
-use echo_app_core::state::{AgentRegistry, CreateSessionInput, HistoryMessage, SessionMeta};
+use echo_app_core::state::{
+    AgentRegistry, CreateSessionInput, HistoryMessage, SessionMeta, UpdateSessionModelInput,
+};
 
 /// 创建会话。返回会话元数据，前端拿到 id 后立即可以发消息。
 #[tauri::command]
@@ -33,6 +35,15 @@ pub async fn agent_delete_session(
     session_id: String,
 ) -> AppResult<()> {
     registry.delete(&session_id).await
+}
+
+#[tauri::command]
+pub async fn agent_update_model(
+    registry: State<'_, Arc<AgentRegistry>>,
+    session_id: String,
+    input: UpdateSessionModelInput,
+) -> AppResult<SessionMeta> {
+    registry.update_model(&session_id, input.model).await
 }
 
 /// 读取会话历史消息（精简字段）。
