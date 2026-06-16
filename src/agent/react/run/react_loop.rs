@@ -655,13 +655,16 @@ impl ReactAgent {
         .await;
         *self.current_turn.lock().unwrap_or_else(|e| e.into_inner()) = Some(turn.clone());
 
+        // Persist memory-worthy triggers before recall injection mutates context.
+        self.detect_and_write_memory_triggers(message).await;
+
         // Inject relevant long-term memories
         let mut recalled = 0usize;
         match self.recall_long_term_memories(message).await {
             Ok(items) if !items.is_empty() => {
                 recalled = items.len();
                 debug!(agent = %agent, count = items.len(), "📚 Injecting relevant long-term memories");
-                let mut lines = vec!["[Related historical memories]".to_string()];
+                let mut lines = vec!["[memory_context] Relevant historical memories:".to_string()];
                 for (i, item) in items.iter().enumerate() {
                     let content_str = item
                         .value
@@ -671,12 +674,15 @@ impl ReactAgent {
                         .unwrap_or_else(|| item.value.to_string());
                     lines.push(format!("{}. {}", i + 1, content_str));
                 }
-                lines.push("[Above memories are for reference, please answer based on the current question]".to_string());
+                lines.push(
+                    "[The above memories are for reference; answer the user's CURRENT question.]"
+                        .to_string(),
+                );
                 self.memory
                     .context
                     .lock()
                     .await
-                    .push(Message::user(lines.join("\n")));
+                    .push(Message::system(lines.join("\n")));
             }
             Ok(_) => {}
             Err(e) => {

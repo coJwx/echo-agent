@@ -14,7 +14,7 @@ echo-agent is a composable Agent development framework written in Rust, providin
 |-----|--------|--------------|
 | [01 - ReAct Agent](./01-react-agent.md) | Core engine | Thought→Action→Observation, CoT, parallel tool calls, callbacks |
 | [02 - Tool System](./02-tools.md) | Tools | Tool trait, ToolManager, timeout/retry, concurrency limiting |
-| [03 - Memory System](./03-memory.md) | Memory | Store (long-term), Checkpointer (short-term), namespace isolation |
+| [03 - Memory System](./03-memory.md) | Memory | Store (long-term), RuntimeStateStore (runtime checkpoint), ConversationStore (transcript) |
 | [04 - Context Compression](./04-compression.md) | Compression | SlidingWindow, Summary, Hybrid pipeline, ContextManager |
 | [05 - Human-in-the-Loop](./05-human-loop.md) | HIL | Approval gate, Console/Webhook/WebSocket providers |
 | [06 - Multi-Agent Orchestration](./06-subagent.md) | SubAgent | Orchestrator/Worker/Planner, context isolation |
@@ -58,7 +58,6 @@ echo-agent is a composable Agent development framework written in Rust, providin
 | [36 - Data Quality & Statistics](./36-data-quality-statistics.md) | Data Quality / Statistics | Data profiling, anomaly detection, descriptive stats, correlation analysis |
 | [37 - Code Search](./37-code-search.md) | Code Search | Ripgrep, structured output, glob/type filtering, 50KB cap |
 | [38 - Agent Factory & Modes](./38-factory-modes.md) | Agent Factory / Mode Engine / Prompt Templates | mode switching, localization, template rendering |
-| [39 - Tiered Memory](./39-tiered-memory.md) | Tiered Memory | Hot/warm/cold tiers, automatic eviction, token budget management |
 | [40 - Context System](./40-context-system.md) | Context System | ContextAssembler, ContextBudgeter, ContextSelector, priority ordering, budget awareness |
 
 ### Getting Started Guides
@@ -145,8 +144,8 @@ async fn main() -> Result<()> {
 │  └──────────────┘  └────────────┘  └─────────────────┘  │
 │                                                         │
 │  ┌──────────────┐  ┌────────────┐  ┌─────────────────┐  │
-│  │  Checkpointer│  │   Store    │  │HumanApprovalMgr │  │
-│  │(session hist)│  │(long-term) │  │ (approval gate) │  │
+│  │  RuntimeState│  │   Store    │  │HumanApprovalMgr │  │
+│  │ (checkpoint) │  │(long-term) │  │ (approval gate) │  │
 │  └──────────────┘  └────────────┘  └─────────────────┘  │
 │                                                         │
 │  ┌──────────────────────────────────────────────────┐   │
@@ -177,7 +176,7 @@ async fn main() -> Result<()> {
 | Human-in-the-loop | `enable_human_in_loop` | `false` |
 | Chain-of-Thought prompt | `enable_cot` | `true` |
 | Context compression | via `set_compressor()` | none |
-| Thread persistence / resume | `session_id` + `checkpointer_path` | none |
+| Thread persistence / resume | `conversation_id` + `state_store` (`RuntimeStateStore`) | none |
 | Transcript/history projection | `conversation_id` + `ConversationStore` | none |
 
 ---

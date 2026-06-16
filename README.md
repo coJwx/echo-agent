@@ -186,7 +186,7 @@ echo-agent ships with **67 registered tools** across 8 crates, all accessible th
 |---------|-------------|-------------|
 | **ReAct Engine** | Thought → Action → Observation loop with CoT | `agent.execute("task").await?` |
 | **Tool System** | `#[tool]` macro with auto JSON Schema, timeout + retry | `#[tool(name = "calc")] async fn calc(...)` |
-| **Dual-layer Memory** | `Store` (long-term KV) + `Checkpointer` (session) | `.with_memory_tools(store)` |
+| **Memory** | `Store` (long-term KV) + `RuntimeStateStore` (crash recovery) + `ConversationStore` (transcript) | `.with_memory_tools(store)` |
 | **Context Compression** | SlidingWindow / LLM Summary / Hybrid | `SlidingWindowCompressor::new(4096)` |
 | **Token Budget** | Auto-truncation + pre-think compression trigger | `.max_tool_output_tokens(2000)` |
 | **Unified Retry** | One `RetryPolicy` for LLM, MCP, A2A, sandbox | `with_retry(&policy, \|\| ...)` |
@@ -470,10 +470,11 @@ Built-in media tools (feature `media`): PDF extract/info, Excel read/info/to_csv
 
 Built-in data tools (feature `data`): Polars-powered read/filter/aggregate/stats/transform/export.
 
-### 3. Dual-layer Memory — Store + Checkpointer
+### 3. Memory — Store + RuntimeStateStore + ConversationStore
 
 - **Store**: Long-term key-value storage with namespace isolation (`InMemoryStore`, `FileStore`, `SqliteStore`)
-- **Checkpointer**: Session history preservation across restarts (`FileCheckpointer`, `InMemoryCheckpointer`)
+- **RuntimeStateStore**: Full runtime checkpoint (messages + plan + active skills + blocked reason) for crash recovery (`SqliteRuntimeStateStore`)
+- **ConversationStore**: User-visible transcript projection persisted automatically at run finalization
 
 One line to give your agent persistent memory — no manual tool wiring:
 
@@ -1130,7 +1131,6 @@ See `examples/README.md` for the full bucketed inventory and maintenance rules.
 | 60 | [`demo60_data_quality`](examples/demo60_data_quality.rs) | Data quality profiling + statistical analysis |
 | 61 | [`demo61_agent_factory`](examples/demo61_agent_factory.rs) | Agent factory, mode engine, prompt templates |
 | 62 | [`demo62_prompt_templates`](examples/demo62_prompt_templates.rs) | Prompt template manager with variable substitution |
-| 63 | [`demo63_tiered_memory`](examples/demo63_tiered_memory.rs) | Tiered memory: hot/warm/cold with auto-eviction |
 | 64 | [`demo64_tool_pipeline`](examples/demo64_tool_pipeline.rs) | Tool execution pipeline + approval stack |
 | 65 | [`demo65_context_assembler`](examples/demo65_context_assembler.rs) | ContextAssembler: budget-aware context assembly with priority ordering |
 | 66 | [`demo66_context_selector`](examples/demo66_context_selector.rs) | ContextSelector: score and select files by task relevance |
@@ -1205,7 +1205,6 @@ Any **OpenAI-compatible** API, plus native Anthropic and Ollama:
 | Data Quality & Statistics | [EN](docs/en/36-data-quality-statistics.md) | [ZH](docs/zh/36-data-quality-statistics.md) |
 | Code Search | [EN](docs/en/37-code-search.md) | [ZH](docs/zh/37-code-search.md) |
 | Agent Factory & Modes | [EN](docs/en/38-factory-modes.md) | [ZH](docs/zh/38-factory-modes.md) |
-| Tiered Memory | [EN](docs/en/39-tiered-memory.md) | [ZH](docs/zh/39-tiered-memory.md) |
 | Security | [EN](docs/en/security.md) | [ZH](docs/zh/security.md) |
 
 ---

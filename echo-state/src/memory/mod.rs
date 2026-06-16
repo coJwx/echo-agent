@@ -5,14 +5,16 @@
 //! | Layer | Implementation | Scope |
 //! |------|------|--------|
 //! | Short-term context | [`compression::ContextManager`] | Within a single `execute()` call |
-//! | Thread state | [`Checkpointer`] / [`FileCheckpointer`] | Cross-process recovery of the same thread |
 //! | Conversation history | [`ConversationStore`] / `SqliteConversationStore` | Transcript projection, history browsing, multi-user isolation |
 //! | Long-term memory | [`Store`] / [`FileStore`] / `SqliteStore` | Cross-session, cross-user sharing |
+//!
+//! Runtime checkpoints (for resuming an in-flight conversation across
+//! process restarts) live in `echo_agent::state::RuntimeStateStore` — not
+//! in this module.
 //!
 //! **Note**: Trait definitions and data types now live in `echo_core::memory`.
 //! They are re-exported here for backward compatibility.
 
-pub mod checkpointer;
 pub mod conversation;
 pub mod embedder;
 pub mod embedding_store;
@@ -22,18 +24,20 @@ pub mod sqlite_conversation;
 #[cfg(feature = "sqlite")]
 pub mod sqlite_store;
 pub mod store;
+pub mod typed_store;
 
 // Re-export traits and data types from echo-core (backward compatibility)
-pub use echo_core::memory::checkpointer::{Checkpoint, Checkpointer, ThreadState};
 pub use echo_core::memory::conversation::{
     Conversation, ConversationFilter, ConversationMeta, ConversationStore, NewConversation,
     StoredMessage,
 };
 pub use echo_core::memory::embedder::Embedder;
 pub use echo_core::memory::store::{SearchMode, SearchQuery, Store, StoreItem};
+pub use echo_core::memory::types::{
+    MemoryMeta, MemoryRisk, MemorySource, MemoryStatus, MemoryType, TypedMemoryValue,
+};
 
 // Re-export concrete implementations from sub-modules
-pub use checkpointer::{FileCheckpointer, InMemoryCheckpointer};
 pub use conversation::{project_message, project_messages};
 pub use embedder::HttpEmbedder;
 pub use embedding_store::EmbeddingStore;
@@ -43,9 +47,7 @@ pub use sqlite_conversation::SqliteConversationStore;
 #[cfg(feature = "sqlite")]
 pub use sqlite_store::SqliteStore;
 pub use store::{FileStore, InMemoryStore};
-
-// Legacy alias
-pub use Checkpointer as ThreadStore;
+pub use typed_store::{MemoryFilter, TypedMemoryEntry, TypedMemoryStore};
 
 #[cfg(test)]
 pub use test_utils::MockEmbedder;

@@ -135,9 +135,7 @@ pub fn register_all_tools(tool_manager: &mut dyn ToolRegistrar, work_dir: Option
         use crate::media::image_fetch::ImageFetchTool;
         use crate::media::web_fetch_enhanced::WebFetchToolEnhanced;
         use crate::pdf::{PdfExtractTool, PdfInfoTool};
-        use crate::text::{
-            TextExportTool, TextProcessTool, TextReadTool, TextSearchTool, TextStatsTool,
-        };
+        use crate::text::{TextExportTool, TextProcessTool, TextSearchTool, TextStatsTool};
         use crate::word::{WordInfoTool, WordReadTool, WordStructureTool};
 
         tool_manager.register(Box::new(ImageAnalysisTool));
@@ -160,7 +158,6 @@ pub fn register_all_tools(tool_manager: &mut dyn ToolRegistrar, work_dir: Option
         tool_manager.register(Box::new(WordReadTool));
         tool_manager.register(Box::new(WordInfoTool));
         tool_manager.register(Box::new(WordStructureTool));
-        tool_manager.register(Box::new(TextReadTool));
         tool_manager.register(Box::new(TextSearchTool));
         tool_manager.register(Box::new(TextStatsTool));
         tool_manager.register(Box::new(TextProcessTool));
@@ -205,9 +202,7 @@ pub fn register_all_tools(tool_manager: &mut dyn ToolRegistrar, work_dir: Option
 
     #[cfg(feature = "statistics")]
     {
-        use crate::statistics::{
-            DescriptiveAdvancedTool, HypothesisTestTool, RegressionTool,
-        };
+        use crate::statistics::{DescriptiveAdvancedTool, HypothesisTestTool, RegressionTool};
 
         tool_manager.register(Box::new(HypothesisTestTool::default()));
         tool_manager.register(Box::new(RegressionTool::default()));
@@ -219,8 +214,7 @@ pub fn register_all_tools(tool_manager: &mut dyn ToolRegistrar, work_dir: Option
     {
         use crate::research::{
             ArxivSearchTool, BibtexGenerateTool, ClinicalTrialsSearchTool, PdfFetchTool,
-            PubMedSearchTool, ResearchRecallTool, ResearchRememberTool,
-            SemanticScholarSearchTool,
+            PubMedSearchTool, ResearchRecallTool, ResearchRememberTool, SemanticScholarSearchTool,
         };
         tool_manager.register(Box::new(ArxivSearchTool));
         tool_manager.register(Box::new(SemanticScholarSearchTool));

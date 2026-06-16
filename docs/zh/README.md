@@ -12,7 +12,7 @@
 |------|---------|-----------|
 | [01 - ReAct Agent](01-react-agent.md) | 核心执行引擎 | Thought→Action→Observation、CoT、并行工具调用、回调 |
 | [02 - 工具系统](02-tools.md) | Tools | Tool trait、ToolManager、超时重试、并发限流 |
-| [03 - 记忆系统](03-memory.md) | Memory | Store（长期）、Checkpointer（短期）、namespace 隔离 |
+| [03 - 记忆系统](03-memory.md) | Memory | Store（长期）、RuntimeStateStore（运行时检查点）、ConversationStore（对话历史） |
 | [04 - 上下文压缩](04-compression.md) | Compression | SlidingWindow、Summary、Hybrid、ContextManager |
 | [05 - 人工介入](05-human-loop.md) | Human-in-the-Loop | 审批 Guard、Console/Webhook/WebSocket Provider |
 | [06 - 多 Agent 编排](06-subagent.md) | SubAgent / Orchestration | Orchestrator/Worker/Planner、上下文隔离 |
@@ -56,7 +56,6 @@
 | [36 - 数据质量与统计](36-data-quality-statistics.md) | Data Quality / Statistics | 数据画像、异常检测、描述统计、相关性分析 |
 | [37 - 代码搜索](37-code-search.md) | Code Search | Ripgrep、结构化输出、glob/type 过滤、50KB 上限 |
 | [38 - Agent 工厂与模式](38-factory-modes.md) | Agent Factory / Mode Engine / Prompt Templates | 模式切换、本地化、模板渲染 |
-| [39 - 分层记忆](39-tiered-memory.md) | Tiered Memory | 热/温/冷三层、自动淘汰、Token 预算管理 |
 | [40 - Context 系统](40-context-system.md) | Context System | ContextAssembler、ContextBudgeter、ContextSelector、优先级排序、预算感知 |
 
 ### 入门指南
@@ -143,8 +142,8 @@ async fn main() -> Result<()> {
 │  └──────────────┘  └────────────┘  └─────────────────┘  │
 │                                                         │
 │  ┌──────────────┐  ┌────────────┐  ┌─────────────────┐  │
-│  │  Checkpointer│  │   Store    │  │HumanApprovalMgr │  │
-│  │ (线程恢复)   │  │(长期记忆)  │  │  (审批 Guard)   │  │
+│  │  RuntimeState│  │   Store    │  │HumanApprovalMgr │  │
+│  │ (运行时恢复) │  │(长期记忆)  │  │  (审批 Guard)   │  │
 │  └──────────────┘  └────────────┘  └─────────────────┘  │
 │                                                         │
 │  ┌──────────────────────────────────────────────────┐   │
@@ -172,7 +171,7 @@ async fn main() -> Result<()> {
 | 人工介入 | `enable_human_in_loop` | `false` |
 | Chain-of-Thought 提示词 | `enable_cot` | `true` |
 | 上下文压缩 | 通过 `set_compressor()` | 无 |
-| 线程持久化 / 恢复 | `session_id` + `checkpointer_path` | 无 |
+| 线程持久化 / 恢复 | `conversation_id` + `state_store`（`RuntimeStateStore`） | 无 |
 | transcript/history 投影 | `conversation_id` + `ConversationStore` | 无 |
 
 ---
