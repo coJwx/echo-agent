@@ -25,8 +25,8 @@ export default function MessageInput({ disabled, onSend }: Props) {
   };
 
   return (
-    <div className="px-5 pb-4 pt-2">
-      <div className="mx-auto flex w-full max-w-[940px] items-end gap-2 rounded-2xl border border-[#343434] bg-[#2a2a2a] px-4 py-3 shadow-xl shadow-black/25 transition focus-within:border-[#555]">
+    <div className="px-3 pb-3 pt-2 lg:px-5 lg:pb-4">
+      <div className="mx-auto flex w-full max-w-[940px] items-end gap-2 rounded-2xl border border-[#343434] bg-[#2a2a2a] px-3 py-2.5 lg:px-4 lg:py-3 shadow-xl shadow-black/25 transition focus-within:border-[#555]">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -39,11 +39,11 @@ export default function MessageInput({ disabled, onSend }: Props) {
               : "输入消息  (Enter 发送 · Shift+Enter 换行)"
           }
           className="max-h-40 flex-1 resize-none bg-transparent text-[15px] leading-[1.45] text-ink-primary placeholder:text-[#8f8f8f] focus:outline-none"
-          style={{ minHeight: "4rem" }}
+          style={{ minHeight: "2.5rem" }}
         />
         <button
           type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-secondary transition hover:bg-white/10 hover:text-ink-primary"
+          className="hidden sm:flex h-8 w-8 items-center justify-center rounded-lg text-ink-secondary transition hover:bg-white/10 hover:text-ink-primary"
           disabled={disabled}
           title="附件"
           aria-label="附件"

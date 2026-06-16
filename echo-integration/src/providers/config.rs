@@ -742,7 +742,7 @@ impl Config {
             for model in entry.models {
                 let _model_metadata = (&model.context_window, &model.max_tokens, &model.input);
                 let id = resolve_env_ref(&model.id);
-                let api_model_name = resolve_env_ref(&model.name);
+                let api_model_name = resolve_env_ref(&model.id);
                 let scoped_id = format!("{provider_id}:{id}");
                 let mc = ModelConfig {
                     model: api_model_name,

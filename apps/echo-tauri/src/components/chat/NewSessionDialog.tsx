@@ -21,6 +21,7 @@ export default function NewSessionDialog({ onCancel, onCreated }: Props) {
   const [title, setTitle] = useState("新对话");
   const [model, setModel] = useState("glm-5.1");
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPT);
+  const [workDir, setWorkDir] = useState("");
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -54,6 +55,7 @@ export default function NewSessionDialog({ onCancel, onCreated }: Props) {
         title: title.trim() || "新对话",
         model: model.trim(),
         system_prompt: systemPrompt,
+        work_dir: workDir.trim() || null,
       });
       onCreated(meta);
     } catch (e) {
@@ -113,6 +115,15 @@ export default function NewSessionDialog({ onCancel, onCreated }: Props) {
             className="input-base w-full h-24 resize-none"
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
+          />
+        </Field>
+
+        <Field label="工作目录" hint="留空使用进程默认">
+          <input
+            className="input-base w-full font-mono text-[13px]"
+            value={workDir}
+            onChange={(e) => setWorkDir(e.target.value)}
+            placeholder="/home/chenye/Project/echo-agent"
           />
         </Field>
 

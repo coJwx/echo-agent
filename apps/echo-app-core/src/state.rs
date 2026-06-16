@@ -33,6 +33,7 @@ pub struct SessionMeta {
     pub title: String,
     pub model: String,
     pub system_prompt: String,
+    pub work_dir: Option<String>,
     pub created_at_ms: u128,
     pub updated_at_ms: u128,
 }
@@ -47,6 +48,8 @@ pub struct CreateSessionInput {
     pub temperature: Option<f32>,
     /// 可选：max_tokens
     pub max_tokens: Option<usize>,
+    /// 可选：会话工作目录，None 时使用进程 CWD
+    pub work_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -209,7 +212,7 @@ impl AgentRegistry {
         let mut sessions = HashMap::new();
         for meta in metas {
             let handle =
-                build_session_handle(&meta, checkpointer.clone(), conversation_store.clone())?;
+                build_session_handle(&meta, checkpointer.clone(), conversation_store.clone(), meta.work_dir.clone())?;
             sessions.insert(meta.id.clone(), SessionSlot { meta, handle });
         }
 
@@ -236,6 +239,7 @@ impl AgentRegistry {
             title: input.title,
             model: input.model,
             system_prompt: input.system_prompt,
+            work_dir: input.work_dir.clone(),
             created_at_ms: now,
             updated_at_ms: now,
         };
@@ -244,6 +248,7 @@ impl AgentRegistry {
             &meta,
             self.checkpointer.clone(),
             self.conversation_store.clone(),
+            input.work_dir,
         )?;
 
         self.meta_store.upsert(meta.clone()).await?;
@@ -279,6 +284,7 @@ impl AgentRegistry {
             &meta,
             self.checkpointer.clone(),
             self.conversation_store.clone(),
+            meta.work_dir.clone(),
         )?;
 
         {
@@ -509,36 +515,21 @@ fn sort_session_metas(metas: &mut [SessionMeta]) {
     metas.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
 }
 
-/// 把 `ToolRegistrar::register` 的回调收集到 Vec，便于传给
-/// `ReactAgentBuilder::tools(Vec<Box<dyn Tool>>)`。
-#[derive(Default)]
-struct ToolCollector {
-    tools: Vec<Box<dyn Tool>>,
-}
-
-impl ToolRegistrar for ToolCollector {
-    fn register(&mut self, tool: Box<dyn Tool>) {
-        self.tools.push(tool);
-    }
-}
-
 fn build_session_handle(
     meta: &SessionMeta,
     checkpointer: Arc<dyn Checkpointer>,
     conversation_store: Arc<dyn ConversationStore>,
+    work_dir: Option<String>,
 ) -> AppResult<AgentHandle> {
-    // 通过 echo_tools 的 register_all_tools 一次性收集所有
-    // 编译时开启 feature 的工具（files / shell …），避免和它的清单漂移。
-    let mut collector = ToolCollector::default();
-    register_all_tools(&mut collector);
+    let work_dir_path = work_dir.map(PathBuf::from);
 
     let mut agent: ReactAgent = ReactAgentBuilder::new()
         .name(meta.title.clone())
         .model(meta.model.clone())
         .system_prompt(meta.system_prompt.clone())
-        .max_iterations(30) // 探索类问题 10 步常常爆，给 30 步缓冲
+        .max_iterations(30)
         .enable_tools()
-        .tools(collector.tools)
+        .working_dir(work_dir_path)
         .checkpointer(checkpointer, meta.id.clone())
         .conversation_id(meta.id.clone())
         .build()
@@ -572,6 +563,7 @@ mod tests {
             title: format!("session-{id}"),
             model: "test-model".to_string(),
             system_prompt: "You are testing".to_string(),
+            work_dir: None,
             created_at_ms: 10,
             updated_at_ms,
         }
@@ -681,6 +673,7 @@ mod tests {
             system_prompt: "You are testing".to_string(),
             temperature: None,
             max_tokens: None,
+            work_dir: None,
         }
     }
 

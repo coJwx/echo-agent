@@ -75,6 +75,8 @@ pub struct ReactAgentBuilder {
     state_store: Option<Arc<dyn crate::state::RuntimeStateStore>>,
     /// Optional visibility horizon config for proactive tool trace compaction.
     visibility_horizon: Option<echo_state::compression::horizon::VisibilityHorizonConfig>,
+    /// Working directory for tool operations and project rules.
+    working_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for ReactAgentBuilder {
@@ -131,6 +133,7 @@ impl ReactAgentBuilder {
             intent_router: None,
             state_store: None,
             visibility_horizon: None,
+            working_dir: None,
         }
     }
 
@@ -343,6 +346,12 @@ impl ReactAgentBuilder {
     /// Set maximum iteration count
     pub fn max_iterations(mut self, max: usize) -> Self {
         self.max_iterations = max;
+        self
+    }
+
+    /// Set working directory (affects tool paths, project rules, etc.)
+    pub fn working_dir(mut self, path: Option<std::path::PathBuf>) -> Self {
+        self.working_dir = path;
         self
     }
 
@@ -729,6 +738,9 @@ impl ReactAgentBuilder {
             .token_limit(self.token_limit)
             .max_tokens(self.max_tokens)
             .temperature(self.temperature);
+        if let Some(wd) = self.working_dir {
+            config = config.working_dir(Some(wd));
+        }
 
         if let Some(fmt) = self.response_format {
             config = config.response_format(fmt);

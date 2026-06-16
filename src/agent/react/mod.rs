@@ -467,7 +467,7 @@ impl ReactAgent {
 
     fn register_feature_gated_tools(config: &AgentConfig, tool_manager: &mut ToolManager) {
         if config.enable_tool {
-            echo_tools::register_all_tools(tool_manager);
+            echo_tools::register_all_tools(tool_manager, config.working_dir.clone());
         }
     }
 

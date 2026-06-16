@@ -18,8 +18,8 @@
   }
 
   *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   *::-webkit-scrollbar-thumb {
@@ -29,6 +29,22 @@
 
   *::-webkit-scrollbar-track {
     background: transparent;
+  }
+
+  /* Mobile touch & overscroll prevention */
+  html {
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+
+  /* Safe area insets for notched devices */
+  @supports (padding-top: env(safe-area-inset-top)) {
+    .safe-area-top {
+      padding-top: env(safe-area-inset-top);
+    }
+    .safe-area-bottom {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
   }
 }
 

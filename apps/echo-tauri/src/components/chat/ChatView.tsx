@@ -84,8 +84,8 @@ export default function ChatView({
   return (
     <div className="relative flex min-h-0 flex-1 bg-[#111111]">
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 items-center justify-between border-b border-[#242424] bg-[#171717] px-5">
-          <div className="flex min-w-0 items-center gap-3">
+        <header className="flex h-12 items-center justify-between border-b border-[#242424] bg-[#171717] px-3 lg:px-5">
+          <div className="flex min-w-0 items-center gap-2 lg:gap-3">
             <button
               type="button"
               onClick={onToggleSidebar}
@@ -104,12 +104,12 @@ export default function ChatView({
               <div className="truncate">{current?.title ?? "选择或新建一个对话"}</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 lg:gap-3">
             {current && (
-              <label className="flex items-center gap-2 text-[12px] text-ink-secondary">
-                <span>模型</span>
+              <label className="hidden md:flex items-center gap-2 text-[12px] text-ink-secondary">
+                <span className="hidden lg:inline">模型</span>
                 <select
-                  className="h-8 max-w-52 rounded-lg border border-[#2f2f2f] bg-[#222] px-2 text-[12px] text-ink-primary outline-none transition hover:border-[#4a4a4a] focus:border-brand disabled:opacity-60"
+                  className="h-8 max-w-36 lg:max-w-52 rounded-lg border border-[#2f2f2f] bg-[#222] px-2 text-[12px] text-ink-primary outline-none transition hover:border-[#4a4a4a] focus:border-brand disabled:opacity-60"
                   value={current.model}
                   onChange={(event) => updateModel(event.target.value)}
                   disabled={streaming || updatingModel || selectableModels.length === 0}
@@ -129,8 +129,22 @@ export default function ChatView({
                 生成中
               </span>
             )}
-            <div className="flex items-center gap-2">
-              {toolbarItems.map((item) => {
+            <div className="flex items-center gap-1 lg:gap-2">
+              {toolbarItems.slice(0, 2).map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    className="hidden md:flex h-8 w-8 items-center justify-center rounded-lg border border-[#2f2f2f] bg-[#222] text-xs text-ink-secondary transition hover:border-[#4a4a4a] hover:bg-[#2a2a2a] hover:text-ink-primary"
+                    title={item.label}
+                    aria-label={item.label}
+                  >
+                    <Icon className="h-4 w-4" strokeWidth={2} />
+                  </button>
+                );
+              })}
+              {toolbarItems.slice(2).map((item) => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -176,19 +190,25 @@ export default function ChatView({
         />
       </section>
       {showInspector && (
-        <aside className="w-80 shrink-0 border-l border-[#242424] bg-[#171717] p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[14px] font-semibold text-ink-primary">属性</h2>
-            <button
-              type="button"
-              onClick={() => setShowInspector(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2f2f2f] bg-[#222] text-xs text-ink-secondary transition hover:border-[#4a4a4a] hover:bg-[#2a2a2a] hover:text-ink-primary"
-              title="收起属性面板"
-              aria-label="收起属性面板"
-            >
-              <X className="h-4 w-4" strokeWidth={2} />
-            </button>
-          </div>
+        <>
+          {/* Mobile overlay backdrop */}
+          <div
+            className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+            onClick={() => setShowInspector(false)}
+          />
+          <aside className="w-80 shrink-0 border-l border-[#242424] bg-[#171717] p-4 max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-50 max-lg:w-full max-lg:max-w-md max-lg:shadow-2xl max-lg:shadow-black/50">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-ink-primary">属性</h2>
+              <button
+                type="button"
+                onClick={() => setShowInspector(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2f2f2f] bg-[#222] text-xs text-ink-secondary transition hover:border-[#4a4a4a] hover:bg-[#2a2a2a] hover:text-ink-primary"
+                title="收起属性面板"
+                aria-label="收起属性面板"
+              >
+                <X className="h-4 w-4" strokeWidth={2} />
+              </button>
+            </div>
           <div className="mt-3 space-y-3">
             <MetaField label="智能体 ID" value={current?.id.slice(0, 12) ?? "agent_12345"} />
             <MetaField label="名称" value={current?.title ?? "数据分析助手"} />
@@ -232,6 +252,7 @@ export default function ChatView({
             />
           </div>
         </aside>
+        </>
       )}
     </div>
   );

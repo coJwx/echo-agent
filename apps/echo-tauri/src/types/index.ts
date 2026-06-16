@@ -5,6 +5,7 @@ export interface SessionMeta {
   title: string;
   model: string;
   system_prompt: string;
+  work_dir?: string | null;
   created_at_ms: number;
   updated_at_ms: number;
 }
@@ -13,6 +14,7 @@ export interface CreateSessionInput {
   title: string;
   model: string;
   system_prompt: string;
+  work_dir?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
 }

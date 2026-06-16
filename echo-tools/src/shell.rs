@@ -10,6 +10,7 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 use shlex::split as shlex_split;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use tokio::process::Command;
 
@@ -118,6 +119,8 @@ pub struct ShellTool {
     strict_mode: bool,
     /// Optional sandbox executor
     sandbox: Option<Arc<dyn SandboxExecutor>>,
+    /// Optional working directory for command execution
+    work_dir: Option<PathBuf>,
 }
 
 impl Default for ShellTool {
@@ -132,6 +135,7 @@ impl ShellTool {
         Self {
             strict_mode: true,
             sandbox: None,
+            work_dir: None,
         }
     }
 
@@ -140,12 +144,19 @@ impl ShellTool {
         Self {
             strict_mode: false,
             sandbox: None,
+            work_dir: None,
         }
     }
 
     /// Set the sandbox executor; commands will be executed through the sandbox
     pub fn with_sandbox(mut self, sandbox: Arc<dyn SandboxExecutor>) -> Self {
         self.sandbox = Some(sandbox);
+        self
+    }
+
+    /// Set the working directory for command execution
+    pub fn with_work_dir(mut self, dir: PathBuf) -> Self {
+        self.work_dir = Some(dir);
         self
     }
 
@@ -429,7 +440,12 @@ impl Tool for ShellTool {
                 }
             } else {
                 // Direct execution (no sandbox, using direct argv mode to reject sh -c injection)
-                match Command::new(program).args(args).output().await {
+                let mut cmd = Command::new(program);
+                cmd.args(args);
+                if let Some(ref wd) = self.work_dir {
+                    cmd.current_dir(wd);
+                }
+                match cmd.output().await {
                     Ok(output) => {
                         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();

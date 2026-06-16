@@ -4,15 +4,20 @@
 //! into any type implementing [`ToolRegistrar`](echo_core::tools::ToolRegistrar).
 
 use echo_core::tools::ToolRegistrar;
+use std::path::PathBuf;
 
 /// Register all feature-gated domain tools into the given registrar.
 #[allow(unused_variables)]
-pub fn register_all_tools(tool_manager: &mut dyn ToolRegistrar) {
+pub fn register_all_tools(tool_manager: &mut dyn ToolRegistrar, work_dir: Option<PathBuf>) {
     // ── shell ─────────────────────────────────────────────────────────────
     #[cfg(feature = "shell")]
     {
         use crate::shell::ShellTool;
-        tool_manager.register(Box::new(ShellTool::new()));
+        let shell = match work_dir.clone() {
+            Some(wd) => ShellTool::new().with_work_dir(wd),
+            None => ShellTool::new(),
+        };
+        tool_manager.register(Box::new(shell));
     }
 
     // ── files ─────────────────────────────────────────────────────────────
@@ -29,20 +34,33 @@ pub fn register_all_tools(tool_manager: &mut dyn ToolRegistrar) {
         use crate::files::grep::GrepTool;
         use crate::files::repo_map::RepoMapTool;
 
-        tool_manager.register(Box::new(ReadFileTool::new()));
-        tool_manager.register(Box::new(WriteFileTool::new()));
-        tool_manager.register(Box::new(AppendFileTool::new()));
-        tool_manager.register(Box::new(ListDirTool::new()));
-        tool_manager.register(Box::new(CreateFileTool::new()));
-        tool_manager.register(Box::new(DeleteFileTool::new()));
-        tool_manager.register(Box::new(UpdateFileTool::new()));
-        tool_manager.register(Box::new(MoveFileTool::new()));
-        tool_manager.register(Box::new(GrepTool::new()));
-        tool_manager.register(Box::new(GlobTool::new()));
-        tool_manager.register(Box::new(EditFileTool::new()));
-        tool_manager.register(Box::new(DiffTool::new()));
-        tool_manager.register(Box::new(RepoMapTool::new()));
-        tool_manager.register(Box::new(CodeSearchTool::new()));
+        // When work_dir is set, restrict file tools with base_dir for safety.
+        // Out-of-bounds access returns a hard error (no approval prompt yet).
+        // Full approval pipeline integration (PermissionService + WebSocket HITL)
+        // is planned but requires frontend support for approval dialogs.
+        macro_rules! with_base {
+            ($tool:ident) => {{
+                match &work_dir {
+                    Some(d) => Box::new($tool::with_base_dir(d)),
+                    None => Box::new($tool::new()),
+                }
+            }};
+        }
+
+        tool_manager.register(with_base!(ReadFileTool));
+        tool_manager.register(with_base!(WriteFileTool));
+        tool_manager.register(with_base!(AppendFileTool));
+        tool_manager.register(with_base!(ListDirTool));
+        tool_manager.register(with_base!(CreateFileTool));
+        tool_manager.register(with_base!(DeleteFileTool));
+        tool_manager.register(with_base!(UpdateFileTool));
+        tool_manager.register(with_base!(MoveFileTool));
+        tool_manager.register(with_base!(GrepTool));
+        tool_manager.register(with_base!(GlobTool));
+        tool_manager.register(with_base!(EditFileTool));
+        tool_manager.register(with_base!(DiffTool));
+        tool_manager.register(with_base!(RepoMapTool));
+        tool_manager.register(with_base!(CodeSearchTool));
     }
 
     #[cfg(not(any(

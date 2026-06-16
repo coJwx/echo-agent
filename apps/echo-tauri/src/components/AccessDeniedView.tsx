@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Camera, KeyRound, LogIn, ScanQrCode, X } from "lucide-react";
+import jsQR from "jsqr";
 
 interface AccessDeniedViewProps {
   onSubmitToken: (token: string) => void;
@@ -90,6 +91,7 @@ function QrScanner({
   onToken: (token: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -101,9 +103,23 @@ function QrScanner({
       const Detector = (
         window as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }
       ).BarcodeDetector;
-      if (!Detector) {
-        setError("当前浏览器不支持扫码，请使用桌面端输入 token。");
-        return;
+      let nativeDetector: BarcodeDetectorInstance | null = null;
+      let useNative = false;
+
+      // Try to create native detector, fall back to jsQR on any failure
+      if (Detector) {
+        try {
+          nativeDetector = new Detector({ formats: ["qr_code"] });
+          // quick probe detect — some browsers expose the constructor
+          // but throw "service unavailable" at runtime (iOS Chrome, etc.)
+          const probe = document.createElement("canvas");
+          probe.width = 1;
+          probe.height = 1;
+          await nativeDetector.detect(probe);
+          useNative = true;
+        } catch {
+          // native unavailable — jsQR fallback below
+        }
       }
 
       try {
@@ -115,18 +131,43 @@ function QrScanner({
         video.srcObject = stream;
         await video.play();
 
-        const detector = new Detector({ formats: ["qr_code"] });
         const scan = async () => {
           if (stopped) return;
           try {
-            const codes = await detector.detect(video);
-            const value = codes[0]?.rawValue?.trim();
-            if (value) {
-              onToken(value);
-              return;
+            if (useNative && nativeDetector) {
+              const codes = await nativeDetector.detect(video);
+              const value = codes[0]?.rawValue?.trim();
+              if (value) {
+                onToken(value);
+                return;
+              }
+            } else {
+              // jsQR fallback: capture frame to canvas
+              const canvas = canvasRef.current;
+              if (canvas && video.videoWidth > 0) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext("2d");
+                if (ctx) {
+                  ctx.drawImage(video, 0, 0);
+                  const imageData = ctx.getImageData(
+                    0,
+                    0,
+                    canvas.width,
+                    canvas.height,
+                  );
+                  const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                  });
+                  if (code?.data) {
+                    onToken(code.data.trim());
+                    return;
+                  }
+                }
+              }
             }
-          } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+          } catch {
+            // individual frame error — retry next frame
           }
           frame = window.setTimeout(scan, 350);
         };
@@ -165,6 +206,7 @@ function QrScanner({
           muted
           playsInline
         />
+        <canvas ref={canvasRef} className="hidden" />
         {error && (
           <div className="mt-3 rounded-lg border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-[13px] text-accent-red">
             {error}

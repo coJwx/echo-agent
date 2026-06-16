@@ -396,6 +396,7 @@ dependencies = [
  "axum",
  "dotenvy",
  "echo-app-core",
+ "echo_core",
  "futures-util",
  "include_dir",
  "mime_guess",

@@ -10,10 +10,10 @@ interface SettingsViewProps {
 
 export default function SettingsView({ isTauri }: SettingsViewProps) {
   return (
-    <div className="flex min-h-0 flex-1 bg-bg-base">
-      <aside className="w-56 shrink-0 border-r border-border-subtle bg-bg-panel px-3 py-4">
-        <div className="mb-3 px-2 text-[13px] font-medium text-ink-muted">设置</div>
-        <nav className="space-y-1">
+    <div className="flex min-h-0 flex-1 flex-col lg:flex-row bg-bg-base">
+      <aside className="shrink-0 border-b lg:border-b-0 lg:border-r border-border-subtle bg-bg-panel px-3 py-3 lg:py-4 lg:w-56 lg:shrink-0">
+        <div className="hidden lg:block mb-3 px-2 text-[13px] font-medium text-ink-muted">设置</div>
+        <nav className="flex lg:flex-col gap-1 overflow-x-auto">
           {isTauri ? (
             <SettingsNavItem selected icon={<Settings className="h-4 w-4" />}>
               通用
@@ -105,8 +105,8 @@ function ConnectionSettings() {
   const targetUrl = info?.network_url || info?.local_url || "";
 
   return (
-    <div className="px-6 py-6">
-      <div className="flex max-w-4xl flex-col gap-5">
+    <div className="px-4 py-4 lg:px-6 lg:py-6">
+      <div className="flex max-w-4xl flex-col gap-4 lg:gap-5">
         <header>
           <h1 className="text-[22px] font-semibold text-ink-primary">连接</h1>
           <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-ink-secondary">
@@ -120,8 +120,8 @@ function ConnectionSettings() {
           </div>
         )}
 
-        <section className="grid gap-5 lg:grid-cols-[320px_1fr]">
-          <div className="card flex min-h-[360px] flex-col items-center justify-center p-5">
+        <section className="grid gap-4 lg:gap-5 lg:grid-cols-[320px_1fr]">
+          <div className="card flex min-h-[260px] lg:min-h-[360px] flex-col items-center justify-center p-4 lg:p-5">
             {info ? (
               <div
                 className="rounded-lg bg-white p-4"

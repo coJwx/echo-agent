@@ -91,6 +91,13 @@ export default function App() {
 
   return (
     <div className="flex h-full w-full bg-bg-base">
+      {/* Mobile backdrop — tap to close sidebar */}
+      {!sidebarCollapsed && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+          onClick={() => setSidebarCollapsed(true)}
+        />
+      )}
       <Sidebar
         active={tab}
         collapsed={sidebarCollapsed}
@@ -101,6 +108,7 @@ export default function App() {
         onNewChat={handleNewChat}
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
+        mobileOnClose={() => setSidebarCollapsed(true)}
       />
       <main className="flex-1 min-w-0 flex flex-col">
         {tab === "chat" && (

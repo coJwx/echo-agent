@@ -35,7 +35,7 @@ export default function MessageList({ messages, placeholder }: Props) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-4">
+    <div className="flex-1 overflow-y-auto px-3 lg:px-5 py-4">
       <div className="mx-auto flex w-full max-w-[940px] flex-col gap-3">
       {messages.map((m) => (
         <MessageBubble key={m.id} m={m} />
@@ -65,7 +65,7 @@ function MessageBubble({ m }: { m: ChatMessage }) {
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[72%] rounded-2xl bg-[#303030] px-3.5 py-2.5 text-[15px] leading-[1.55] text-white shadow-sm">
+        <div className="max-w-[85%] lg:max-w-[72%] rounded-2xl bg-[#303030] px-3.5 py-2.5 text-[15px] leading-[1.55] text-white shadow-sm">
           <ReactMarkdown>{m.content}</ReactMarkdown>
         </div>
       </div>
