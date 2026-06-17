@@ -3,7 +3,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type {
   ChatMessage,
-  HistoryMessage,
+  ChatTurn,
   StreamPayload,
 } from "../types";
 import { reduceAssistantMessage } from "./chatReducer";
@@ -80,7 +80,7 @@ export function useChatSession(sessionId: string | null) {
       unlistenRef.current = un;
 
       // 2. 拉历史
-      let history: HistoryMessage[] = [];
+      let history: ChatTurn[] = [];
       try {
         history = await api.history(sessionId);
       } catch (e) {

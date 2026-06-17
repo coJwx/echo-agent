@@ -16,6 +16,7 @@ use std::collections::HashMap;
 pub(crate) fn process_stream_chunk(
     chunk: &ChatCompletionChunk,
     content_buffer: &mut String,
+    reasoning_buffer: &mut String,
     tool_call_map: &mut HashMap<u32, (String, String, String)>,
     in_reasoning: &mut bool,
 ) -> Vec<AgentEvent> {
@@ -30,6 +31,7 @@ pub(crate) fn process_stream_chunk(
                 *in_reasoning = true;
                 events.push(AgentEvent::ThinkStart);
             }
+            reasoning_buffer.push_str(reasoning);
             events.push(AgentEvent::Token(reasoning.clone()));
         }
 
@@ -80,6 +82,49 @@ pub(crate) fn process_stream_chunk(
     }
 
     events
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::types::{ChunkChoice, DeltaMessage};
+
+    fn chunk(delta: DeltaMessage) -> ChatCompletionChunk {
+        ChatCompletionChunk {
+            id: "chunk-1".to_string(),
+            choices: vec![ChunkChoice {
+                index: 0,
+                delta,
+                finish_reason: None,
+            }],
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn process_stream_chunk_collects_reasoning_content_for_history() {
+        let mut content_buffer = String::new();
+        let mut reasoning_buffer = String::new();
+        let mut tool_call_map = HashMap::new();
+        let mut in_reasoning = false;
+
+        let events = process_stream_chunk(
+            &chunk(DeltaMessage {
+                role: None,
+                content: None,
+                reasoning_content: Some("think".to_string()),
+                tool_calls: None,
+            }),
+            &mut content_buffer,
+            &mut reasoning_buffer,
+            &mut tool_call_map,
+            &mut in_reasoning,
+        );
+
+        assert_eq!(reasoning_buffer, "think");
+        assert!(matches!(events.first(), Some(AgentEvent::ThinkStart)));
+        assert!(matches!(events.get(1), Some(AgentEvent::Token(token)) if token == "think"));
+    }
 }
 
 /// Convert the collected tool_call_map into structured tool call lists.

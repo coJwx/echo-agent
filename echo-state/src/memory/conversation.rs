@@ -44,6 +44,25 @@ pub fn project_message(conversation_id: &str, message: &Message) -> Result<Store
         attachments_json: None,
         tool_calls_json,
         tool_result_json,
+        reasoning_content: message.reasoning_content.clone(),
         created_at: Utc::now().to_rfc3339(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_message_preserves_reasoning_content() {
+        let mut message = Message::assistant("final answer".to_string());
+        message.reasoning_content = Some("checked the project state first".to_string());
+
+        let stored = project_message("conversation-1", &message).unwrap();
+
+        assert_eq!(
+            stored.reasoning_content.as_deref(),
+            Some("checked the project state first")
+        );
+    }
 }

@@ -73,10 +73,11 @@ pub(crate) async fn run_tools(
             cb.on_think_end(agent, &ts, pt, ct).await;
         }
     }
-    context
-        .lock()
-        .await
-        .push(Message::assistant_with_tools(msg_tc));
+    let mut assistant_message = Message::assistant_with_tools(msg_tc);
+    if !think.reasoning_buffer.trim().is_empty() {
+        assistant_message.reasoning_content = Some(think.reasoning_buffer.clone());
+    }
+    context.lock().await.push(assistant_message);
 
     #[cfg(feature = "human-loop")]
     let (appr, conc) = {

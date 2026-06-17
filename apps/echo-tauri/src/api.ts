@@ -1,8 +1,8 @@
 import type {
   AccessTokenInfo,
+  ChatTurn,
   CreateSessionInput,
   DebugChatTrace,
-  HistoryMessage,
   ProviderConfig,
   ProviderModelInput,
   SessionMeta,
@@ -29,7 +29,7 @@ interface ApiTransport {
   ): Promise<SessionMeta>;
   getProviderConfig(): Promise<ProviderConfig>;
   saveProviderModel(input: ProviderModelInput): Promise<ProviderConfig>;
-  history(sessionId: string): Promise<HistoryMessage[]>;
+  history(sessionId: string): Promise<ChatTurn[]>;
   chat(sessionId: string, message: string): Promise<void>;
   debugChatCollect(sessionId: string, message: string): Promise<DebugChatTrace>;
   listenSession(
@@ -71,7 +71,7 @@ export const api = {
   },
 
   /** 读取会话历史。切换会话时调用，渲染历史消息。 */
-  async history(sessionId: string): Promise<HistoryMessage[]> {
+  async history(sessionId: string): Promise<ChatTurn[]> {
     return (await getTransport()).history(sessionId);
   },
 
@@ -172,7 +172,7 @@ async function createTauriTransport(): Promise<ApiTransport> {
       return invoke<ProviderConfig>("provider_model_save", { input });
     },
     history(sessionId) {
-      return invoke<HistoryMessage[]>("agent_history", { sessionId });
+      return invoke<ChatTurn[]>("agent_history", { sessionId });
     },
     chat(sessionId, message) {
       return invoke<void>("agent_chat_stream", { sessionId, message });
@@ -242,7 +242,7 @@ function createWebTransport(): ApiTransport {
       });
     },
     history(sessionId) {
-      return request<HistoryMessage[]>(
+      return request<ChatTurn[]>(
         baseUrl,
         token,
         `/api/sessions/${encodeURIComponent(sessionId)}/history`,

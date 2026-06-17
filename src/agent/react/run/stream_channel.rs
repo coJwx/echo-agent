@@ -163,9 +163,9 @@ impl AgentSnapshot {
                 .await?
                 {
                     IterOutcome::Continue => continue,
-                    IterOutcome::FinalText { answer } => {
+                    IterOutcome::FinalText { answer, reasoning } => {
                         match phases::finalize::emit_final_text(
-                            &self, &context, &tx, &mut state, iteration, pt, ct, answer,
+                            &self, &context, &tx, &mut state, iteration, pt, ct, answer, reasoning,
                         )
                         .await?
                         {
@@ -192,11 +192,11 @@ impl AgentSnapshot {
                 // it here would mean a phase returned an outcome out of band
                 // — guard against future refactors by treating it as a
                 // terminal text emission.
-                IterOutcome::FinalText { answer } => {
+                IterOutcome::FinalText { answer, reasoning } => {
                     let pt = 0;
                     let ct = 0;
                     match phases::finalize::emit_final_text(
-                        &self, &context, &tx, &mut state, iteration, pt, ct, answer,
+                        &self, &context, &tx, &mut state, iteration, pt, ct, answer, reasoning,
                     )
                     .await?
                     {

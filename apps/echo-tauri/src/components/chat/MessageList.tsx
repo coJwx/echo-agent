@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Check, Cpu, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { ChatMessage } from "../../types";
+import type { ReactNode } from "react";
 
 interface Props {
   messages: ChatMessage[];
@@ -108,6 +109,8 @@ function MessageBubble({ m }: { m: ChatMessage }) {
               </summary>
               <div className="text-[15px] text-ink-primary">{m.content}</div>
             </details>
+          ) : m.segments?.length ? (
+            <SegmentedAssistantView message={m} />
           ) : (
             <>
               {hasThinking && (
@@ -140,6 +143,74 @@ function MessageBubble({ m }: { m: ChatMessage }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function SegmentedAssistantView({ message }: { message: ChatMessage }) {
+  const segments = message.segments ?? [];
+  const nodes: ReactNode[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    if (segment.kind === "tool_call") {
+      const run = [];
+      let j = i;
+      while (j < segments.length && segments[j].kind === "tool_call") {
+        const toolSegment = segments[j];
+        if (toolSegment.kind === "tool_call") {
+          run.push(toolSegment.call);
+        }
+        j++;
+      }
+
+      if (run.length > 2) {
+        nodes.push(<ToolCallsView key={`tool-run-${i}`} calls={run} />);
+      } else {
+        for (let k = 0; k < run.length; k++) {
+          nodes.push(<ToolCallItem key={`tool-${i + k}`} call={run[k]} />);
+        }
+      }
+
+      i = j - 1;
+      continue;
+    }
+
+    if (segment.kind === "thinking") {
+      nodes.push(
+        <ThinkingView
+          key={`thinking-${i}`}
+          content={segment.content}
+          active={Boolean(message.thinkingActive) && i === segments.length - 1}
+          tokens={segment.tokens}
+        />,
+      );
+      continue;
+    }
+
+    nodes.push(
+      <div
+        key={`text-${i}`}
+        className="readable-prose prose prose-invert max-w-none whitespace-pre-wrap break-words"
+      >
+        <ReactMarkdown>{segment.content}</ReactMarkdown>
+      </div>,
+    );
+  }
+
+  return (
+    <>
+      {nodes}
+      {message.status === "streaming" && nodes.length === 0 && (
+        <div className="readable-prose prose prose-invert max-w-none whitespace-pre-wrap break-words">
+          <ReactMarkdown>…</ReactMarkdown>
+        </div>
+      )}
+      {message.status === "error" && message.error && (
+        <div className="mt-2 rounded border border-accent-red/30 bg-accent-red/10 px-2 py-1 text-[12px] text-accent-red">
+          {message.error}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -181,51 +252,52 @@ function ToolCallsView({ calls }: { calls: NonNullable<ChatMessage["toolCalls"]>
         <span className="text-[11px]">{calls.length}</span>
       </summary>
       <div className="space-y-1.5 px-2.5 pb-2.5 pt-2">
-        {calls.map((c, i) => {
-          const state = c.error ? "error" : c.result ? "ok" : "running";
-          const badge =
-            state === "error"
-              ? "bg-accent-red/10 text-accent-red border-accent-red/25"
-              : state === "ok"
-                ? "bg-[#202820] text-accent-green border-[#2a3f2d]"
-                : "bg-accent-amber/10 text-accent-amber border-accent-amber/25";
-          return (
-            <details
-              key={i}
-              className={"rounded-lg border bg-bg-card/60 " + badge}
-            >
-              <summary className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5">
-                <ToolStateIcon state={state} />
-                <span className="font-medium">{c.name}</span>
-                <span className="ml-auto rounded bg-white/5 px-2 py-0.5 text-[11px]">
-                  JSON
-                </span>
-              </summary>
-              <div className="space-y-1 px-2.5 pb-2.5 pt-1 font-mono text-[12px] leading-[1.45]">
-                <div>
-                  <span className="text-ink-secondary">args:</span>{" "}
-                  <code className="break-all">{JSON.stringify(c.args)}</code>
-                </div>
-                {c.result && (
-                  <div>
-                    <span className="text-ink-secondary">result:</span>{" "}
-                    <code className="break-all whitespace-pre-wrap">
-                      {c.result.length > 400
-                        ? c.result.slice(0, 400) + "..."
-                        : c.result}
-                    </code>
-                  </div>
-                )}
-                {c.error && (
-                  <div>
-                    <span className="text-ink-secondary">error:</span>{" "}
-                    <code className="break-all">{c.error}</code>
-                  </div>
-                )}
-              </div>
-            </details>
-          );
-        })}
+        {calls.map((call, i) => (
+          <ToolCallItem key={i} call={call} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function ToolCallItem({ call }: { call: NonNullable<ChatMessage["toolCalls"]>[number] }) {
+  const state = call.error ? "error" : call.result ? "ok" : "running";
+  const badge =
+    state === "error"
+      ? "bg-accent-red/10 text-accent-red border-accent-red/25"
+      : state === "ok"
+        ? "bg-[#202820] text-accent-green border-[#2a3f2d]"
+        : "bg-accent-amber/10 text-accent-amber border-accent-amber/25";
+  return (
+    <details className={"mb-2 rounded-lg border bg-bg-card/60 text-[12px] " + badge}>
+      <summary className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5">
+        <ToolStateIcon state={state} />
+        <span className="font-medium">{call.name}</span>
+        <span className="ml-auto rounded bg-white/5 px-2 py-0.5 text-[11px]">
+          JSON
+        </span>
+      </summary>
+      <div className="space-y-1 px-2.5 pb-2.5 pt-1 font-mono text-[12px] leading-[1.45]">
+        <div>
+          <span className="text-ink-secondary">args:</span>{" "}
+          <code className="break-all">{JSON.stringify(call.args)}</code>
+        </div>
+        {call.result && (
+          <div>
+            <span className="text-ink-secondary">result:</span>{" "}
+            <code className="break-all whitespace-pre-wrap">
+              {call.result.length > 400
+                ? call.result.slice(0, 400) + "..."
+                : call.result}
+            </code>
+          </div>
+        )}
+        {call.error && (
+          <div>
+            <span className="text-ink-secondary">error:</span>{" "}
+            <code className="break-all">{call.error}</code>
+          </div>
+        )}
       </div>
     </details>
   );

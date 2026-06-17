@@ -77,6 +77,8 @@ pub struct StoredMessage {
     pub tool_calls_json: Option<String>,
     /// Tool execution result (JSON)
     pub tool_result_json: Option<String>,
+    /// Assistant reasoning / thinking content.
+    pub reasoning_content: Option<String>,
     /// Creation time
     pub created_at: String,
 }

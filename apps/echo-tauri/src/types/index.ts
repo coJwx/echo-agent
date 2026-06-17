@@ -104,26 +104,26 @@ export interface ChatMessage {
   thinkingContent?: string;
   thinkingActive?: boolean;
   toolCalls?: ToolCallTrace[];
+  segments?: ChatMessageSegment[];
   thinkTokens?: { prompt: number; completion: number };
   status: "pending" | "streaming" | "done" | "error";
   elapsedMs?: number;
   error?: string;
 }
 
-// 后端 agent_history 命令返回的"精简版"消息
-// 字段对齐 Rust 侧 HistoryMessage，只保留前端渲染所需的最小集
-export interface HistoryMessage {
-  id: string; // 由 (role, idx) 拼接出的稳定 id
-  role: "user" | "assistant" | "system" | "tool" | "custom";
-  content: string; // 文本主体
-  tool_call_id?: string | null;
-  name?: string | null;
-  thinkingContent?: string;
-  thinking_content?: string;
-  toolCalls?: ToolCallTrace[];
-  tool_calls?: ToolCallTrace[];
-  thinkTokens?: { prompt: number; completion: number };
-  think_tokens?: { prompt: number; completion: number };
+export type ChatMessageSegment =
+  | { kind: "text"; content: string }
+  | {
+      kind: "thinking";
+      content: string;
+      tokens?: { prompt: number; completion: number };
+    }
+  | { kind: "tool_call"; call: ToolCallTrace };
+
+export interface ChatTurn {
+  id: string;
+  role: "user" | "assistant" | "system";
+  segments: ChatMessageSegment[];
   status: "done" | "streaming" | "error" | "pending";
   elapsedMs?: number;
   elapsed_ms?: number;
@@ -151,7 +151,7 @@ export interface AccessTokenInfo {
 
 export interface DebugChatTrace {
   events: StreamPayload[];
-  history: HistoryMessage[];
+  history: ChatTurn[];
   elapsed_ms: number;
   ok: boolean;
   error: string | null;

@@ -17,12 +17,9 @@ use uuid::Uuid;
 
 use echo_agent::prelude::{AgentHandle, ReactAgent, ReactAgentBuilder};
 use echo_core::llm::types::Message;
-use echo_core::tools::{Tool, ToolRegistrar};
 use echo_state::memory::{
-    Checkpointer, ConversationStore, FileCheckpointer, NewConversation, SqliteConversationStore,
-    ThreadState, project_messages,
+    ConversationStore, NewConversation, SqliteConversationStore, StoredMessage, project_messages,
 };
-use echo_tools::register_all_tools;
 
 use crate::error::{AppError, AppResult};
 
@@ -163,16 +160,13 @@ impl SessionMetaStore {
 #[derive(Debug, Clone)]
 pub struct AgentRegistryPaths {
     pub sessions_path: PathBuf,
-    pub checkpoints_path: PathBuf,
     pub conversations_path: PathBuf,
 }
-
 impl AgentRegistryPaths {
     pub fn from_app_data_dir(dir: impl AsRef<Path>) -> Self {
         let dir = dir.as_ref();
         Self {
             sessions_path: dir.join("sessions.json"),
-            checkpoints_path: dir.join("checkpoints.json"),
             conversations_path: dir.join("conversations.sqlite"),
         }
     }
@@ -192,17 +186,12 @@ struct SessionSlot {
 pub struct AgentRegistry {
     sessions: RwLock<HashMap<String, SessionSlot>>,
     meta_store: SessionMetaStore,
-    checkpointer: Arc<dyn Checkpointer>,
     conversation_store: Arc<dyn ConversationStore>,
 }
 
 impl AgentRegistry {
     pub async fn new(paths: AgentRegistryPaths) -> AppResult<Self> {
         let meta_store = SessionMetaStore::new(paths.sessions_path)?;
-        let checkpointer = Arc::new(
-            FileCheckpointer::new(paths.checkpoints_path)
-                .map_err(|e| AppError::PersistenceInit(e.to_string()))?,
-        );
         let conversation_store = Arc::new(
             SqliteConversationStore::new(paths.conversations_path)
                 .map_err(|e| AppError::PersistenceInit(e.to_string()))?,
@@ -212,14 +201,13 @@ impl AgentRegistry {
         let mut sessions = HashMap::new();
         for meta in metas {
             let handle =
-                build_session_handle(&meta, checkpointer.clone(), conversation_store.clone(), meta.work_dir.clone())?;
+                build_session_handle(&meta, conversation_store.clone(), meta.work_dir.clone())?;
             sessions.insert(meta.id.clone(), SessionSlot { meta, handle });
         }
 
         Ok(Self {
             sessions: RwLock::new(sessions),
             meta_store,
-            checkpointer,
             conversation_store,
         })
     }
@@ -246,7 +234,6 @@ impl AgentRegistry {
 
         let handle = build_session_handle(
             &meta,
-            self.checkpointer.clone(),
             self.conversation_store.clone(),
             input.work_dir,
         )?;
@@ -282,7 +269,6 @@ impl AgentRegistry {
 
         let handle = build_session_handle(
             &meta,
-            self.checkpointer.clone(),
             self.conversation_store.clone(),
             meta.work_dir.clone(),
         )?;
@@ -329,10 +315,6 @@ impl AgentRegistry {
         drop(guard);
 
         self.meta_store.delete(session_id).await?;
-        self.checkpointer
-            .delete_session(session_id)
-            .await
-            .map_err(|e| AppError::PersistenceDelete(e.to_string()))?;
         self.conversation_store
             .delete_conversation(session_id)
             .await
@@ -355,32 +337,22 @@ impl AgentRegistry {
 
     /// 读取该会话的对话历史（精简版）。
     ///
-    /// 走 `ReactAgent::get_messages`（`src/agent/react/mod.rs:709`）的
-    /// 异步路径——`Agent::messages()` 同步版注释明确说会返回空，必须用
-    /// 异步路径。`AgentHandle::read_async` 提供正确的
-    /// `tokio::sync::RwLock::read().await` 时机。
-    pub async fn history(&self, session_id: &str) -> AppResult<Vec<HistoryMessage>> {
+    /// 优先从 agent 内存读取；agent 内存为空（如重启后）时
+    /// 回退到 `ConversationStore` 持久化记录。
+    pub async fn history(&self, session_id: &str) -> AppResult<Vec<ChatTurn>> {
         let handle = self.handle(session_id).await?;
         let msgs: Vec<Message> = handle.read_async(|a| Box::pin(a.get_messages())).await;
-        if msgs.len() <= 1
-            && let Some(state) = self
-                .checkpointer
-                .get_state(session_id)
+        if msgs.len() <= 1 {
+            let stored = self
+                .conversation_store
+                .get_messages(session_id)
                 .await
-                .map_err(|e| AppError::PersistenceRead(e.to_string()))?
-        {
-            return Ok(state
-                .messages
-                .iter()
-                .enumerate()
-                .map(|(i, m)| history_message(m, i))
-                .collect());
+                .map_err(|e| AppError::PersistenceRead(e.to_string()))?;
+            if stored.len() > 1 {
+                return Ok(stored_messages_to_chat_turns(&stored));
+            }
         }
-        Ok(msgs
-            .iter()
-            .enumerate()
-            .map(|(i, m)| history_message(m, i))
-            .collect())
+        Ok(messages_to_chat_turns(&msgs))
     }
 
     pub async fn persist_session_state(&self, session_id: &str) -> AppResult<()> {
@@ -392,11 +364,6 @@ impl AgentRegistry {
             (slot.handle.clone(), slot.meta.title.clone())
         };
         let messages: Vec<Message> = handle.read_async(|a| Box::pin(a.get_messages())).await;
-
-        self.checkpointer
-            .put_state(session_id, ThreadState::from_messages(messages.clone()))
-            .await
-            .map_err(|e| AppError::PersistenceWrite(e.to_string()))?;
 
         self.conversation_store
             .ensure_conversation(NewConversation {
@@ -416,23 +383,53 @@ impl AgentRegistry {
     }
 }
 
-/// 前端历史列表用的精简消息形状。
-/// 与 `apps/echo-tauri/src/types/index.ts::HistoryMessage` 字段一一对应。
-#[derive(Debug, Clone, Serialize)]
-pub struct HistoryMessage {
+/// Frontend history view: one visible chat turn with ordered render segments.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ChatTurn {
     pub id: String,
-    pub role: String,
-    pub content: String,
-    pub tool_call_id: Option<String>,
-    pub name: Option<String>,
-    pub thinking_content: Option<String>,
-    pub tool_calls: Option<Vec<HistoryToolCall>>,
+    pub role: ChatTurnRole,
+    pub segments: Vec<ChatSegment>,
     pub elapsed_ms: Option<u64>,
-    pub status: String,
+    pub status: ChatTurnStatus,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct HistoryToolCall {
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatTurnRole {
+    System,
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatTurnStatus {
+    Done,
+    Streaming,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChatSegment {
+    Text { content: String },
+    Thinking { content: String },
+    ToolCall { call: ToolCallView },
+}
+
+impl ChatSegment {
+    #[cfg(test)]
+    fn kind(&self) -> &'static str {
+        match self {
+            ChatSegment::Text { .. } => "text",
+            ChatSegment::Thinking { .. } => "thinking",
+            ChatSegment::ToolCall { .. } => "tool_call",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ToolCallView {
     pub id: String,
     pub name: String,
     pub args: serde_json::Value,
@@ -440,68 +437,220 @@ pub struct HistoryToolCall {
     pub error: Option<String>,
 }
 
-/// `Message` → `HistoryMessage` 的纯转换。
-/// role 是字符串，避免前端的 Role 枚举需要再加变体。
-fn history_message(m: &Message, idx: usize) -> HistoryMessage {
-    use echo_core::llm::types::{MessageContent, Role};
+fn messages_to_chat_turns(messages: &[Message]) -> Vec<ChatTurn> {
+    use echo_core::llm::types::Role;
 
-    let role = match &m.role {
-        Role::System => "system",
-        Role::User => "user",
-        Role::Assistant => "assistant",
-        Role::Tool => "tool",
-        Role::Custom(_) => "custom",
-    };
-    let id = format!("{role}-{idx}");
+    let mut turns = Vec::new();
+    let mut pending_assistant: Option<ChatTurn> = None;
+    let mut pushed_system = false;
 
-    let content = match &m.content {
-        MessageContent::Text(s) => s.clone(),
-        MessageContent::Parts(parts) => {
-            // 多模态：把所有 Text 段拼起来。图片/音频等 non-text 段用
-            // Debug 简写占位（v0 UI 不渲染图片，只占位）
-            parts
-                .iter()
-                .map(|p| match p {
-                    echo_core::llm::types::ContentPart::Text { text } => text.clone(),
-                    other => format!("<{other:?}>"),
-                })
-                .collect::<Vec<_>>()
-                .join("")
+    for (idx, message) in messages.iter().enumerate() {
+        match &message.role {
+            Role::System => {
+                flush_assistant(&mut turns, &mut pending_assistant);
+                if !pushed_system {
+                    let before = turns.len();
+                    push_text_turn(
+                        &mut turns,
+                        format!("system-{idx}"),
+                        ChatTurnRole::System,
+                        message.text_content(),
+                    );
+                    pushed_system = turns.len() > before;
+                }
+            }
+            Role::User => {
+                flush_assistant(&mut turns, &mut pending_assistant);
+                push_text_turn(&mut turns, format!("user-{idx}"), ChatTurnRole::User, message.text_content());
+            }
+            Role::Assistant => {
+                let turn = pending_assistant.get_or_insert_with(|| ChatTurn {
+                    id: format!("assistant-{idx}"),
+                    role: ChatTurnRole::Assistant,
+                    segments: Vec::new(),
+                    elapsed_ms: None,
+                    status: ChatTurnStatus::Done,
+                });
+                append_assistant_message_segments(
+                    turn,
+                    message.reasoning_content.as_deref(),
+                    message.tool_calls.as_deref(),
+                    message.text_content().as_deref(),
+                );
+            }
+            Role::Tool => {
+                if let Some(turn) = pending_assistant.as_mut() {
+                    patch_tool_result(
+                        turn,
+                        message.tool_call_id.as_deref(),
+                        message.name.as_deref(),
+                        message.text_content().unwrap_or_default(),
+                    );
+                }
+            }
+            Role::Custom(_) => {}
         }
-        MessageContent::Empty => String::new(),
-    };
-
-    let tool_calls = m.tool_calls.as_ref().map(|calls| {
-        calls
-            .iter()
-            .map(|c| HistoryToolCall {
-                id: c.id.clone(),
-                name: c.function.name.clone(),
-                args: serde_json::from_str(&c.function.arguments)
-                    .unwrap_or(serde_json::Value::String(c.function.arguments.clone())),
-                result: None, // tool 结果在独立的 role=Tool 消息里，UI 会按 tool_call_id 配对
-                error: None,
-            })
-            .collect::<Vec<_>>()
-    });
-
-    // 对历史消息，状态都标 done：
-    //   - assistant:        done
-    //   - user / system:    done
-    //   - tool:             done
-    let status = "done".to_string();
-
-    HistoryMessage {
-        id,
-        role: role.to_string(),
-        content,
-        tool_call_id: m.tool_call_id.clone(),
-        name: m.name.clone(),
-        thinking_content: m.reasoning_content.clone(),
-        tool_calls,
-        elapsed_ms: None,
-        status,
     }
+
+    flush_assistant(&mut turns, &mut pending_assistant);
+    turns
+}
+
+fn stored_messages_to_chat_turns(messages: &[StoredMessage]) -> Vec<ChatTurn> {
+    let mut turns = Vec::new();
+    let mut pending_assistant: Option<ChatTurn> = None;
+    let mut pushed_system = false;
+
+    for (idx, message) in messages.iter().enumerate() {
+        match message.role.as_str() {
+            "system" => {
+                flush_assistant(&mut turns, &mut pending_assistant);
+                if !pushed_system {
+                    let before = turns.len();
+                    push_text_turn(
+                        &mut turns,
+                        format!("system-{idx}"),
+                        ChatTurnRole::System,
+                        message.content.clone(),
+                    );
+                    pushed_system = turns.len() > before;
+                }
+            }
+            "user" => {
+                flush_assistant(&mut turns, &mut pending_assistant);
+                push_text_turn(&mut turns, format!("user-{idx}"), ChatTurnRole::User, message.content.clone());
+            }
+            "assistant" => {
+                let turn = pending_assistant.get_or_insert_with(|| ChatTurn {
+                    id: format!("assistant-{idx}"),
+                    role: ChatTurnRole::Assistant,
+                    segments: Vec::new(),
+                    elapsed_ms: None,
+                    status: ChatTurnStatus::Done,
+                });
+                let tool_calls = parse_stored_tool_calls(message.tool_calls_json.as_deref());
+                append_assistant_message_segments(
+                    turn,
+                    message.reasoning_content.as_deref(),
+                    Some(tool_calls.as_slice()),
+                    message.content.as_deref(),
+                );
+            }
+            "tool" => {
+                if let Some(turn) = pending_assistant.as_mut() {
+                    let (tool_call_id, name) = parse_tool_result_meta(message.tool_result_json.as_deref());
+                    patch_tool_result(
+                        turn,
+                        tool_call_id.as_deref(),
+                        name.as_deref(),
+                        message.content.clone().unwrap_or_default(),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    flush_assistant(&mut turns, &mut pending_assistant);
+    turns
+}
+
+fn push_text_turn(
+    turns: &mut Vec<ChatTurn>,
+    id: String,
+    role: ChatTurnRole,
+    content: Option<String>,
+) {
+    let Some(content) = content.filter(|content| !content.trim().is_empty()) else {
+        return;
+    };
+    turns.push(ChatTurn {
+        id,
+        role,
+        segments: vec![ChatSegment::Text { content }],
+        elapsed_ms: None,
+        status: ChatTurnStatus::Done,
+    });
+}
+
+fn flush_assistant(turns: &mut Vec<ChatTurn>, pending: &mut Option<ChatTurn>) {
+    if let Some(turn) = pending.take()
+        && !turn.segments.is_empty()
+    {
+        turns.push(turn);
+    }
+}
+
+fn append_assistant_message_segments(
+    turn: &mut ChatTurn,
+    reasoning_content: Option<&str>,
+    tool_calls: Option<&[echo_core::llm::types::ToolCall]>,
+    content: Option<&str>,
+) {
+    if let Some(reasoning) = reasoning_content.filter(|reasoning| !reasoning.trim().is_empty()) {
+        turn.segments.push(ChatSegment::Thinking {
+            content: reasoning.to_string(),
+        });
+    }
+
+    for call in tool_calls.unwrap_or_default() {
+        turn.segments.push(ChatSegment::ToolCall {
+            call: tool_call_view(call),
+        });
+    }
+
+    if let Some(content) = content.filter(|content| !content.trim().is_empty()) {
+        turn.segments.push(ChatSegment::Text {
+            content: content.to_string(),
+        });
+    }
+}
+
+fn tool_call_view(call: &echo_core::llm::types::ToolCall) -> ToolCallView {
+    ToolCallView {
+        id: call.id.clone(),
+        name: call.function.name.clone(),
+        args: serde_json::from_str(&call.function.arguments)
+            .unwrap_or_else(|_| serde_json::Value::String(call.function.arguments.clone())),
+        result: None,
+        error: None,
+    }
+}
+
+fn patch_tool_result(
+    turn: &mut ChatTurn,
+    tool_call_id: Option<&str>,
+    name: Option<&str>,
+    result: String,
+) {
+    let Some(tool_call_id) = tool_call_id else {
+        return;
+    };
+    for segment in &mut turn.segments {
+        let ChatSegment::ToolCall { call } = segment else {
+            continue;
+        };
+        if call.id == tool_call_id && name.is_none_or(|name| call.name == name) {
+            call.result = Some(result);
+            return;
+        }
+    }
+}
+
+fn parse_stored_tool_calls(json: Option<&str>) -> Vec<echo_core::llm::types::ToolCall> {
+    json.and_then(|json| serde_json::from_str(json).ok())
+        .unwrap_or_default()
+}
+
+fn parse_tool_result_meta(json: Option<&str>) -> (Option<String>, Option<String>) {
+    json.and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .map(|v| {
+            (
+                v.get("tool_call_id").and_then(|v| v.as_str()).map(String::from),
+                v.get("name").and_then(|v| v.as_str()).map(String::from),
+            )
+        })
+        .unwrap_or((None, None))
 }
 
 fn now_ms() -> u128 {
@@ -517,7 +666,6 @@ fn sort_session_metas(metas: &mut [SessionMeta]) {
 
 fn build_session_handle(
     meta: &SessionMeta,
-    checkpointer: Arc<dyn Checkpointer>,
     conversation_store: Arc<dyn ConversationStore>,
     work_dir: Option<String>,
 ) -> AppResult<AgentHandle> {
@@ -530,7 +678,6 @@ fn build_session_handle(
         .max_iterations(30)
         .enable_tools()
         .working_dir(work_dir_path)
-        .checkpointer(checkpointer, meta.id.clone())
         .conversation_id(meta.id.clone())
         .build()
         .map_err(|e| AppError::AgentBuild(e.to_string()))?;
@@ -542,6 +689,7 @@ fn build_session_handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use echo_core::llm::types::{FunctionCall, MessageContent, ToolCall};
     use std::path::PathBuf;
 
     fn temp_store_path(name: &str) -> PathBuf {
@@ -552,11 +700,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("echo-tauri-{name}-{}", Uuid::new_v4()));
         AgentRegistryPaths {
             sessions_path: dir.join("sessions.json"),
-            checkpoints_path: dir.join("checkpoints.json"),
             conversations_path: dir.join("conversations.sqlite"),
         }
     }
-
     fn meta(id: &str, updated_at_ms: u128) -> SessionMeta {
         SessionMeta {
             id: id.to_string(),
@@ -677,6 +823,177 @@ mod tests {
         }
     }
 
+    fn tool_call(id: &str, name: &str, args: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: name.to_string(),
+                arguments: args.to_string(),
+            },
+        }
+    }
+
+    fn turn_text(turn: &ChatTurn) -> String {
+        turn.segments
+            .iter()
+            .filter_map(|segment| match segment {
+                ChatSegment::Text { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    #[test]
+    fn chat_turns_preserve_assistant_segment_order_and_tool_results() {
+        let mut first_assistant = Message::assistant_with_tools(vec![tool_call(
+            "call_find",
+            "find",
+            r#"{"path":"."}"#,
+        )]);
+        first_assistant.reasoning_content = Some("Need to inspect the tree.".to_string());
+        first_assistant.content = MessageContent::Text("I will inspect files.".to_string());
+
+        let mut second_assistant = Message::assistant("This is a Rust project.".to_string());
+        second_assistant.reasoning_content = Some("Now I can summarize.".to_string());
+
+        let messages = vec![
+            Message::user("Analyze this project".to_string()),
+            first_assistant,
+            Message::tool_result(
+                "call_find".to_string(),
+                "find".to_string(),
+                "Cargo.toml\nsrc".to_string(),
+            ),
+            second_assistant,
+        ];
+
+        let turns = messages_to_chat_turns(&messages);
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, ChatTurnRole::User);
+        assert_eq!(turns[1].role, ChatTurnRole::Assistant);
+        assert_eq!(
+            turns[1]
+                .segments
+                .iter()
+                .map(|segment| segment.kind())
+                .collect::<Vec<_>>(),
+            vec!["thinking", "tool_call", "text", "thinking", "text"]
+        );
+
+        match &turns[1].segments[1] {
+            ChatSegment::ToolCall { call } => {
+                assert_eq!(call.id, "call_find");
+                assert_eq!(call.name, "find");
+                assert_eq!(call.args, serde_json::json!({ "path": "." }));
+                assert_eq!(call.result.as_deref(), Some("Cargo.toml\nsrc"));
+                assert_eq!(call.error, None);
+            }
+            other => panic!("expected tool_call segment, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_turns_keep_only_first_system_message_in_visible_history() {
+        let messages = vec![
+            Message::system("You are testing".to_string()),
+            Message::user("hello".to_string()),
+            Message::system("Repeated runtime prompt".to_string()),
+            Message::assistant("hi".to_string()),
+        ];
+
+        let turns = messages_to_chat_turns(&messages);
+
+        assert_eq!(
+            turns.iter().map(|turn| &turn.role).collect::<Vec<_>>(),
+            vec![
+                &ChatTurnRole::System,
+                &ChatTurnRole::User,
+                &ChatTurnRole::Assistant
+            ]
+        );
+        assert_eq!(turn_text(&turns[0]), "You are testing");
+        assert_eq!(turn_text(&turns[1]), "hello");
+        assert_eq!(turn_text(&turns[2]), "hi");
+    }
+
+    #[test]
+    fn stored_messages_assemble_to_chat_turn_segments() {
+        let stored = vec![
+            StoredMessage {
+                id: Some(1),
+                conversation_id: "conversation-1".to_string(),
+                role: "user".to_string(),
+                content: Some("Analyze this project".to_string()),
+                attachments_json: None,
+                tool_calls_json: None,
+                tool_result_json: None,
+                reasoning_content: None,
+                created_at: "2026-06-17T00:00:00Z".to_string(),
+            },
+            StoredMessage {
+                id: Some(2),
+                conversation_id: "conversation-1".to_string(),
+                role: "assistant".to_string(),
+                content: Some("I will inspect files.".to_string()),
+                attachments_json: None,
+                tool_calls_json: Some(
+                    serde_json::json!([
+                        {
+                            "id": "call_find",
+                            "type": "function",
+                            "function": {
+                                "name": "find",
+                                "arguments": "{\"path\":\".\"}"
+                            }
+                        }
+                    ])
+                    .to_string(),
+                ),
+                tool_result_json: None,
+                reasoning_content: Some("Need to inspect the tree.".to_string()),
+                created_at: "2026-06-17T00:00:01Z".to_string(),
+            },
+            StoredMessage {
+                id: Some(3),
+                conversation_id: "conversation-1".to_string(),
+                role: "tool".to_string(),
+                content: Some("Cargo.toml\nsrc".to_string()),
+                attachments_json: None,
+                tool_calls_json: None,
+                tool_result_json: Some(
+                    serde_json::json!({
+                        "tool_call_id": "call_find",
+                        "name": "find"
+                    })
+                    .to_string(),
+                ),
+                reasoning_content: None,
+                created_at: "2026-06-17T00:00:02Z".to_string(),
+            },
+        ];
+
+        let turns = stored_messages_to_chat_turns(&stored);
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(
+            turns[1]
+                .segments
+                .iter()
+                .map(|segment| segment.kind())
+                .collect::<Vec<_>>(),
+            vec!["thinking", "tool_call", "text"]
+        );
+        match &turns[1].segments[1] {
+            ChatSegment::ToolCall { call } => {
+                assert_eq!(call.result.as_deref(), Some("Cargo.toml\nsrc"));
+            }
+            other => panic!("expected tool_call segment, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn agent_registry_create_persists_metadata_before_returning() {
         let paths = temp_registry_paths("create-persists");
@@ -711,61 +1028,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_registry_delete_removes_metadata_and_checkpoint() {
+    async fn agent_registry_delete_removes_metadata_and_conversation() {
         let paths = temp_registry_paths("delete-cleanup");
         let registry = AgentRegistry::new(paths.clone()).await.unwrap();
         let created = registry.create(create_input("delete me")).await.unwrap();
-        registry
-            .checkpointer
-            .put_state(
-                &created.id,
-                echo_state::memory::ThreadState::from_messages(vec![Message::user(
-                    "remember me".to_string(),
-                )]),
-            )
-            .await
-            .unwrap();
+        // 写入一些对话数据
+        let handle = registry.handle(&created.id).await.unwrap();
+        handle
+            .read_async(|agent| {
+                Box::pin(agent.load_messages(vec![
+                    Message::user("remember me".to_string()),
+                    Message::assistant("ok".to_string()),
+                ]))
+            })
+            .await;
+        registry.persist_session_state(&created.id).await.unwrap();
 
         registry.delete(&created.id).await.unwrap();
         let reloaded = AgentRegistry::new(paths.clone()).await.unwrap();
 
         assert!(reloaded.list().await.is_empty());
-        assert!(
-            reloaded
-                .checkpointer
-                .get_state(&created.id)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        let stored = reloaded
+            .conversation_store
+            .get_messages(&created.id)
+            .await
+            .unwrap();
+        assert!(stored.is_empty());
 
         let _ = std::fs::remove_dir_all(paths.root_dir().unwrap());
     }
 
     #[tokio::test]
-    async fn agent_registry_history_reads_checkpoint_after_restart() {
-        let paths = temp_registry_paths("history-checkpoint");
+    async fn agent_registry_history_reads_from_conversation_store_after_restart() {
+        let paths = temp_registry_paths("history-conv");
         let registry = AgentRegistry::new(paths.clone()).await.unwrap();
         let created = registry.create(create_input("history")).await.unwrap();
-        registry
-            .checkpointer
-            .put_state(
-                &created.id,
-                echo_state::memory::ThreadState::from_messages(vec![
+        let handle = registry.handle(&created.id).await.unwrap();
+        handle
+            .read_async(|agent| {
+                Box::pin(agent.load_messages(vec![
                     Message::user("hello".to_string()),
                     Message::assistant("hi there".to_string()),
-                ]),
-            )
-            .await
-            .unwrap();
-        let reloaded = AgentRegistry::new(paths.clone()).await.unwrap();
+                ]))
+            })
+            .await;
+        registry.persist_session_state(&created.id).await.unwrap();
 
+        let reloaded = AgentRegistry::new(paths.clone()).await.unwrap();
         let history = reloaded.history(&created.id).await.unwrap();
 
         assert_eq!(
             history
                 .iter()
-                .map(|m| m.content.as_str())
+                .map(turn_text)
                 .collect::<Vec<_>>(),
             vec!["hello", "hi there"]
         );
@@ -774,7 +1089,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_registry_persists_runtime_state_to_checkpoint_and_transcript() {
+    async fn agent_registry_persists_runtime_state_to_transcript() {
         let paths = temp_registry_paths("runtime-persist");
         let registry = AgentRegistry::new(paths.clone()).await.unwrap();
         let created = registry.create(create_input("runtime")).await.unwrap();
@@ -790,14 +1105,6 @@ mod tests {
 
         registry.persist_session_state(&created.id).await.unwrap();
         let reloaded = AgentRegistry::new(paths.clone()).await.unwrap();
-
-        let checkpoint = reloaded
-            .checkpointer
-            .get_state(&created.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(checkpoint.messages.len(), 2);
 
         let transcript = reloaded
             .conversation_store

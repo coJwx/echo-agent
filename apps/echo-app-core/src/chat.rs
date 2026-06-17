@@ -7,12 +7,12 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 use crate::events::StreamPayload;
-use crate::state::{AgentRegistry, HistoryMessage};
+use crate::state::{AgentRegistry, ChatTurn};
 
 #[derive(Debug, Serialize)]
 pub struct DebugChatTrace {
     pub events: Vec<StreamPayload>,
-    pub history: Vec<HistoryMessage>,
+    pub history: Vec<ChatTurn>,
     pub elapsed_ms: u128,
     pub ok: bool,
     pub error: Option<String>,
@@ -271,6 +271,7 @@ mod tests {
             system_prompt: "You are Echo. For the user's request, call list_dir exactly once with path \".\", then answer from the tool result. Do not call list_dir more than once.".to_string(),
             temperature: Some(0.0),
             max_tokens: Some(1024),
+            work_dir: None,
         };
 
         write_jsonl(
@@ -367,15 +368,25 @@ mod tests {
 
         let tool_call_count = history
             .iter()
-            .filter(|m| {
-                m.tool_calls
-                    .as_ref()
-                    .is_some_and(|calls| calls.iter().any(|call| call.name == "list_dir"))
+            .flat_map(|turn| turn.segments.iter())
+            .filter(|segment| {
+                matches!(
+                    segment,
+                    crate::state::ChatSegment::ToolCall { call }
+                        if call.name == "list_dir"
+                )
             })
             .count();
         let tool_result_count = history
             .iter()
-            .filter(|m| m.role == "tool" && !m.content.is_empty())
+            .flat_map(|turn| turn.segments.iter())
+            .filter(|segment| {
+                matches!(
+                    segment,
+                    crate::state::ChatSegment::ToolCall { call }
+                        if call.result.as_ref().is_some_and(|result| !result.is_empty())
+                )
+            })
             .count();
 
         write_jsonl(

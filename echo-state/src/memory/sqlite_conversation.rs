@@ -86,11 +86,38 @@ impl SqliteConversationStore {
                 attachments_json    TEXT,
                 tool_calls_json     TEXT,
                 tool_result_json    TEXT,
+                reasoning_content   TEXT,
                 created_at          TEXT NOT NULL DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS idx_msg_conv ON message(conversation_id);",
         )
         .map_err(|e| memory_io_error("failed to create tables", e))?;
+        Self::ensure_message_columns(conn)?;
+        Ok(())
+    }
+
+    fn ensure_message_columns(conn: &Connection) -> Result<()> {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(message)")
+            .map_err(|e| memory_io_error("failed to inspect message table", e))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| memory_io_error("failed to read message columns", e))?;
+
+        let mut has_reasoning_content = false;
+        for row in rows {
+            let column = row.map_err(|e| memory_io_error("failed to read message column", e))?;
+            if column == "reasoning_content" {
+                has_reasoning_content = true;
+                break;
+            }
+        }
+
+        if !has_reasoning_content {
+            conn.execute_batch("ALTER TABLE message ADD COLUMN reasoning_content TEXT;")
+                .map_err(|e| memory_io_error("failed to add message.reasoning_content", e))?;
+        }
+
         Ok(())
     }
 }
@@ -334,8 +361,8 @@ impl ConversationStore for SqliteConversationStore {
             // Insert new messages
             for msg in messages {
                 let insert_result = conn.execute(
-                    "INSERT INTO message (conversation_id, role, content, attachments_json, tool_calls_json, tool_result_json, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO message (conversation_id, role, content, attachments_json, tool_calls_json, tool_result_json, reasoning_content, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         conversation_id,
                         msg.role,
@@ -343,6 +370,7 @@ impl ConversationStore for SqliteConversationStore {
                         msg.attachments_json,
                         msg.tool_calls_json,
                         msg.tool_result_json,
+                        msg.reasoning_content,
                         msg.created_at,
                     ],
                 );
@@ -380,7 +408,7 @@ impl ConversationStore for SqliteConversationStore {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, conversation_id, role, content, attachments_json,
-                            tool_calls_json, tool_result_json, created_at
+                            tool_calls_json, tool_result_json, reasoning_content, created_at
                      FROM message WHERE conversation_id = ?1 ORDER BY id ASC",
                 )
                 .map_err(|e| memory_io_error("failed to prepare query", e))?;
@@ -395,7 +423,8 @@ impl ConversationStore for SqliteConversationStore {
                         attachments_json: row.get(4)?,
                         tool_calls_json: row.get(5)?,
                         tool_result_json: row.get(6)?,
-                        created_at: row.get(7)?,
+                        reasoning_content: row.get(7)?,
+                        created_at: row.get(8)?,
                     })
                 })
                 .map_err(|e| memory_io_error("failed to query messages", e))?;
@@ -464,5 +493,58 @@ impl ConversationStore for SqliteConversationStore {
             }
             Ok(result)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn init_tables_adds_reasoning_content_to_existing_message_table() {
+        let path = std::env::temp_dir().join(format!(
+            "echo-state-conversation-migration-{}.sqlite",
+            Uuid::new_v4()
+        ));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE conversation (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id     TEXT NOT NULL UNIQUE,
+                user_id             TEXT NOT NULL DEFAULT 'default',
+                agent_type          TEXT,
+                title               TEXT,
+                summary             TEXT,
+                compressed_before_id INTEGER,
+                created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE message (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id     TEXT NOT NULL REFERENCES conversation(conversation_id) ON DELETE CASCADE,
+                role                TEXT NOT NULL,
+                content             TEXT,
+                attachments_json    TEXT,
+                tool_calls_json     TEXT,
+                tool_result_json    TEXT,
+                created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let _store = SqliteConversationStore::new(&path).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(message)").unwrap();
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(columns.iter().any(|column| column == "reasoning_content"));
+
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -125,6 +125,7 @@ pub(crate) async fn emit_final_text(
     pt: usize,
     ct: usize,
     answer: String,
+    reasoning: String,
 ) -> Result<ControlFlow<(), ()>> {
     let agent = &snap.config.agent_name;
 
@@ -133,10 +134,11 @@ pub(crate) async fn emit_final_text(
         cb.on_think_end(agent, &ts, pt, ct).await;
         cb.on_final_answer(agent, &answer).await;
     }
-    context
-        .lock()
-        .await
-        .push(Message::assistant(answer.clone()));
+    let mut assistant_message = Message::assistant(answer.clone());
+    if !reasoning.trim().is_empty() {
+        assistant_message.reasoning_content = Some(reasoning);
+    }
+    context.lock().await.push(assistant_message);
     snap.auto_snapshot(context, iteration).await;
     if let Some(al) = &snap.guard.audit_logger {
         let ev = crate::audit::AuditEvent::now(

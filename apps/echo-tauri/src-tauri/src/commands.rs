@@ -8,7 +8,7 @@ use echo_app_core::chat::{self, DebugChatTrace};
 use echo_app_core::error::AppResult;
 use echo_app_core::events::channel_name;
 use echo_app_core::state::{
-    AgentRegistry, CreateSessionInput, HistoryMessage, SessionMeta, UpdateSessionModelInput,
+    AgentRegistry, ChatTurn, CreateSessionInput, SessionMeta, UpdateSessionModelInput,
 };
 
 /// 创建会话。返回会话元数据，前端拿到 id 后立即可以发消息。
@@ -56,7 +56,7 @@ pub async fn agent_update_model(
 pub async fn agent_history(
     registry: State<'_, Arc<AgentRegistry>>,
     session_id: String,
-) -> AppResult<Vec<HistoryMessage>> {
+) -> AppResult<Vec<ChatTurn>> {
     registry.history(&session_id).await
 }
 
